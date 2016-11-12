@@ -21,13 +21,16 @@ atomic symbols (m) should be (m . NIL)
 #include <stdarg.h>
 #include "lisp.h"
 
-#define atom(x) (__atom((x)))
+int atom(object_t* sexp) {
 
-int __atom(object_t* sexp) {
 	if (null(sexp))
 		return 1;
-	if (sexp->type == CONS) 
-		return sexp->cdr->type != CONS;
+	if (sexp->type == CONS) {
+		if (null(sexp->cdr))
+			return 1;
+		if (sexp->cdr->type == CONS)
+			return 0;
+	}
 	return 1;
 }
 
@@ -449,99 +452,30 @@ object_t* mkproc(object_t* name, object_t* params, object_t* body) {
 	p->body = body;
 	return p;
 }
-object_t* mkprim(primitive_t prim) {
-	object_t* p = new();
-	p->type = PRIM;
-	p->primitive = prim;
-	return p;
-}
 
-object_t* add(object_t* sexp) {
-	int total;
-	object_t** tmp;
-	for (tmp = &sexp; *tmp; tmp=&(*tmp)->cdr)
-		total += eval(car(*tmp))->integer;
-	return new_int(total);
-}
 
-object_t* appq(object_t* sexp) {
+object_t* evlis(object_t* sexp, object_t* env) {
 	if (null(sexp))
 		return &nil;
-	if (atom(sexp))
-		return cons(new_sym("quote"), sexp);
-	return cons(cons(new_sym("quote"), car(sexp)), appq(cdr(sexp)));
+	object_t* first = eval(car(sexp), env);
+	return cons(first, evlis(cdr(sexp), env));
 }
 
-void apply_param(object_t* param, object_t* args) {
-	object_t** t;
-
-	if (param->type == CONS) {
-		if (atom(param)) {
-			env_insert(car(param), car(args));
-			return;
-		}
-		for (t = &param; *t; t=&(*t)->cdr) {
-			//printf("arg insert");
-			env_insert((*t)->car, args->car);
-			args = args->cdr;
-		}
-	} else {
-		//printf("arg insert no cons");
-		env_insert(param, args);
-	}
+object_t* evcon(object_t* cond, object_t* env) {
+	if (eval(caar(cond), env) == &C_TRUE)
+		return eval(cadar(cond), env);
+	return eval(caddar(cond), env);
 }
 
-object_t* apply(object_t* f, object_t* args) {
-	if (null(f))
-		return &nil;
-	if (f->type == PRIM) {
-		return f->primitive((args));
-	}
-	if (f->type == PROC) {
-		env_push();
-
-		apply_param(f->parameters, (args));
-		//env_list();
-		object_t* ret = (atom(car(f->body))) ? eval(f->body) : evlis(f->body);
-		env_pop();
-		return ret;
-	}
-}
-
-object_t* evlis(object_t* sexp) {
+object_t* eval(object_t* sexp, object_t* env) {
 	if (null(sexp))
 		return &nil;
-	object_t* first = eval(car(sexp));
-	return cons(first, evlis(cdr(sexp)));
-}
-
-object_t* evcon(object_t* cond) {
-	if (eval(caar(cond)) == &C_TRUE)
-		return eval(cadar(cond));
-	return eval(caddar(cond));
-}
-
-object_t* eval(object_t* sexp) {
-	if (null(sexp))
-		return &nil;
-
-			//printf("[eval]: ");
-		//	print(sexp);
 
 	switch(sexp->type) {
 		case INT:
 			return sexp;
 		case SYM: {
-
-			object_t* ret = env_lookup(sexp);
-			if (null(ret)) {
-				printf("Unbound variable!");
-				print(sexp);
-				return &nil;
-			}
-			while(ret->type == SYM)
-				ret = env_lookup(ret);
-			return eval(ret);
+			return env_lookup(sexp);
 		} case CONS: {
 			/*atom [car [e]] → [
 			eq [car [e]; QUOTE] → cadr [e];
@@ -557,100 +491,52 @@ object_t* eval(object_t* sexp) {
 			if (atom(sexp->car)) {
 
 				if(car(sexp)->type == SYM) {
-					if (!strcmp(sexp->car->symbol, "define")) {
-						if (atom(cadr(sexp))) {
-							env_insert(cadr(sexp), (caddr(sexp)));
-							return new_sym("ok");
-						} else {
-							print(sexp);
-
-							object_t* proc = mkproc(car(cadr(sexp)), cdr(cadr(sexp)), caddr(sexp));
-							env_insert(car(cadr(sexp)), proc);
-							return env_lookup(car(cadr(sexp)));
-						}
-					}
 					if (!strcmp(car(sexp)->symbol, "nil"))
 						return &nil;
 					if (!strcmp(sexp->car->symbol, "cons")) 
-						return cons(eval(cadr(sexp)), eval(caddr(sexp)));
+						return cons(eval(cadr(sexp), env), eval(caddr(sexp), env));
 					if (!strcmp(sexp->car->symbol, "car"))
-						return car(eval(cadr(sexp)));
+						return car(eval(cadr(sexp), env));
 					if (!strcmp(sexp->car->symbol, "cdr")) 
-						return cdr(eval(cadr(sexp)));
-					if (!strcmp(sexp->car->symbol, "quote")) {
+						return cdr(eval(cadr(sexp), env));
+					if (!strcmp(sexp->car->symbol, "quote"))
 						return cadr(sexp);
-					}
 					if (!strcmp(sexp->car->symbol, "eq")) 
-						return eq(eval(cadr(sexp)), eval(caddr(sexp)));
+						return eq(eval(cadr(sexp), env), eval(caddr(sexp), env));
 					if (!strcmp(sexp->car->symbol, "atom")) 
-						return atom(eval(cadr(sexp))) ? &C_TRUE : &C_FALSE;
+						return atom(eval(cadr(sexp), env)) ? &C_TRUE : &C_FALSE;
 					if (!strcmp(sexp->car->symbol, "cond")) 
-						return evcon(cdr(sexp));
-					if (!strcmp(sexp->car->symbol, ">"))
-						return eval(cadr(sexp))->integer > eval(caddr(sexp))->integer ?&C_TRUE : &C_FALSE;
-					if (!strcmp(sexp->car->symbol, "<"))
-						return eval(cadr(sexp))->integer < eval(caddr(sexp))->integer ?&C_TRUE : &C_FALSE;
-					if (!strcmp(sexp->car->symbol, "="))
-						return eval(cadr(sexp))->integer == eval(caddr(sexp))->integer ?&C_TRUE : &C_FALSE;
-					if (!strcmp(car(sexp)->symbol, "+"))
-						return apply(mkprim(add), cdr(sexp));
-					if (!strcmp(car(sexp)->symbol, "lambda")) {
-						return mkproc(car(sexp), cadr(sexp), caddr(sexp));
-					}
+						return evcon(cdr(sexp), env);
 		
 				}
-				printf("other primivitve?");
-				print((cons(env_lookup(car(sexp)), evlis(cdr(sexp)))));
-				print(eval(cons(env_lookup(car(sexp)), evlis(cdr(sexp)))));
-				object_t* ret = apply(eval(car(sexp)), evlis(cdr(sexp)));
-				while(!null(ret) && ret->type == PROC)
-					ret = apply(ret, evlis(cdr(sexp)));
-				return ret;
+				return eval(cons(assoc(car(sexp), env), evlis(cdr(sexp), env)), env);
 			}
-		/*
+/*
+			((label ff (lambda (ar dr) ar)) (cons 1 2))
+			(LABEL, FF, (LAMBDA, (X), (COND, (ATOM, X), X), ((QUOTE,T),(FF, (CAR, X))))));((A· B))
 
-((label ff (lambda (x) (+ 1 x))) (quote 1))
-			eq [caar [e]; LABEL] → eval [cons [caddar [e]; cdr [e]];
-			cons [list [cadar [e]; car [e]; a]];
-			eq [caar [e]; LAMBDA] → eval [caddar [e]
-;			append [pair [cadar [e]; evlis [cdr [e]; a]; a]]]
-	*/
+			eq [caar [e]; LABEL] → eval [cons [caddar [e]; cdr [e]]; cons [list [cadar [e]; car [e]; a]];
+			eq [caar [e]; LAMBDA] → eval [caddar [e]; append [pair [cadar [e]; evlis [cdr [e]; a]; a]]]*/
 
 			if (car(car(sexp))->type == SYM) {
 				if (!strcmp(caar(sexp)->symbol, "label")) {
-					printf("EVAL:");
-					print(cons(cadar(sexp), cdr(sexp)));
-					printf("ASSOC");
-					print(cons(cadar(sexp), caddar(sexp)));
+					//eval(cons(cadar(sexp), cdr(sexp)), append(cons(cadar(sexp), caddar(sexp)), env));
+					//print(cons(caddar(sexp), cdr(sexp)));
+					//print(cons(cadar(sexp), cons(car(sexp), cons(env, &nil))));
 					env_insert(cadar(sexp), caddar(sexp));
-					eval(cons(cadar(sexp), cdr(sexp)));
-					env_list();
-
-				}
-
-				if (!strcmp(caar(sexp)->symbol, "quote")) {
-					return (cdr(car(sexp)));
+					return eval(cons(cadar(sexp), cdr(sexp)), env);
 				}
 				if (!strcmp(caar(sexp)->symbol, "lambda")) {
-					return apply(mkproc(car(car(sexp)), cadar(sexp), caddar(sexp)), cdr(sexp));
+					printf("LAMBDA procedure:");
+					print(caddar(sexp));
+					/* IF USING APPEND UNCOMMENT */
+					print(cadar(sexp));
+					print(cdr(sexp));
+					object_t* p = pair(cadar(sexp), evlis(cdr(sexp), env));
+					//print(p);
+					env_insert(car(p), cdr(p));
+					return eval(caddar(sexp), env);
 				}
-				object_t* pr = env_lookup(caar(sexp));
-
-				if (null(pr)) {
-					printf("Unbound variable!\n");
-					return &nil;
-				}
-
-				/* Stacking two procedures */
-				if (!null(pr) && pr->type == PROC) {
-						return apply(apply(pr, cdr(car(sexp))), cdr(sexp));
-				}
-
-				
-				//if LABEL?
-				// eval (cons (caddar sexp) (cdr sexp))
-				//if LAMBDA?
-				// eval (caddar sexp)
 			}
 			return car(car(sexp));
 		}
@@ -659,6 +545,31 @@ object_t* eval(object_t* sexp) {
 			print(sexp);
 	}
 
+}
+
+object_t* append(object_t* pair, object_t* list) {
+	if (null(pair))
+		return list;
+	if (atom(pair))
+		return cons(pair, list);
+	return cons(car(pair), append(cdr(pair), list));
+}
+
+object_t* pair(object_t* x, object_t* y) {
+	if (null(x) && null(y))
+		return &nil;
+	if (atom(x) || atom(y))
+		return cons((x->type==CONS) ? car(x) : x, (y->type==CONS) ? car(y) : y);
+	if (!atom(x) && !atom(y))
+		return cons(cons(car(x), car(y)), pair(cdr(x), cdr(y)));
+}
+
+object_t* appq(object_t* sexp) {
+	if (null(sexp))
+		return &nil;
+	if (atom(sexp))
+		return cons(new_sym("quote"), sexp);
+	return cons(cons(new_sym("quote"), car(sexp)), appq(cdr(sexp)));
 }
 
 int main(int argc, char** argv) {
@@ -674,6 +585,7 @@ int main(int argc, char** argv) {
 	// eval(scan("(define (length list) (cond ((atom list) 1 (+ 1 (length (cdr list))))))"));
 	// print((scan("(1 2 3)")));
 	// print(evlis(scan("(x 2 3)")));
+
 	char* input = malloc(256);
 	size_t sz;
 	do {
@@ -682,7 +594,7 @@ int main(int argc, char** argv) {
 		if (*input == 'q')
 			break;
 		printf("=> ");
-		print(eval(scan(input)));
+		print(eval(scan(input), global_env->alist));
 
 	} while(*input);
 }
