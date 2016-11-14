@@ -209,10 +209,6 @@ s:
 			string = !string;
 			token++;
 			goto s;
-		case '\'':
-			return new_sym("quote");
-			
-
 		case '0'...'9':
 			if (string & !quote) {
 				char* n = malloc(strlen(token) - 1);
@@ -262,13 +258,13 @@ struct obj_list* ol_pop(struct obj_list** ol) {
 
 void push(object_t* list, object_t* new) {
 	object_t** tmp;
-	if (list == NULL || list->type != CONS)
+	if (null(list) || list->type != CONS)
 		return;
-	if (list->car == NULL) {
+	if (null(list->car)) {
 		list->car = new;
 		return;
 	}
-	for (tmp = &list; *tmp; tmp=&(*tmp)->cdr) 
+	for (tmp = &list->cdr; *tmp; tmp=&(*tmp)->cdr) 
 		;
 	(*tmp) = new_cons();
 	(*tmp)->car = new;
@@ -282,6 +278,7 @@ object_t* scan(const char* str) {
 	int i, idx = 0;
 	int d = 0;
 	int literal = 0;
+	int quoted = 0;
 	char word[128];
 	memset(word, 0, 128);
 	struct obj_list* ol = new_ol();
@@ -300,7 +297,23 @@ object_t* scan(const char* str) {
 				idx = 0;
 				continue;
 			case '\'':
-				break;
+				quoted = 1;
+				if (str[i + 1] == '(') {
+					//d++;
+					ol_push(&ol);
+					push(ol->val, new_sym("quote"));
+					push(ol->prev->val, ol->val);
+				}
+				else {
+					push(ol->val, new_sym("quote"));
+					if (idx) 
+						push(ol->val, tok_to_obj(word));
+					//ol->val = (ol->val) ? cons(ol->val, tok_to_obj(word)) : tok_to_obj(word);
+
+				}
+				
+				idx = 0;
+				continue;
 			case '\n':
 			case '\0':
 				word[idx] = '\0';
@@ -314,12 +327,13 @@ object_t* scan(const char* str) {
 				word[idx] = '\0';
 				if (idx) 
 					push(ol->val, tok_to_obj(word));
-
+				
 				if (d>1) {
 					ol_push(&ol);
 					push(ol->prev->val, ol->val);
 					//ol->prev->val = cons(ol->prev->val, ol->val);
 				}
+
 				idx = 0;
 				continue;
 			case ')':
@@ -380,8 +394,6 @@ object_t* eval(object_t* sexp, object_t* env) {
 			return sexp;
 		case SYM: {
 			object_t* ret = assoc(sexp, env);
-			if (null(ret))
-				return &UNBOUND;
 			return ret;
 		} case CONS: {
 			if (atom(sexp->car)) {
@@ -446,6 +458,7 @@ int main(int argc, char** argv) {
 	env = append(pair(cons(new_sym("t"), &nil), cons(&C_TRUE, &nil)), env);
 	env = append(pair(cons(new_sym("f"), &nil), cons(&C_FALSE, &nil)), env);
 	env = append(pair(cons(new_sym("nil"), &nil), cons(&nil, &nil)), env);
+	print(env);
 	printf("Welcome to microLISP. Press ! to exit\n");
 	size_t sz;
 	do {
