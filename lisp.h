@@ -43,13 +43,19 @@ struct object {
 	};
 } nil;
 
+struct obj_list {
+	object_t* val;
+	struct obj_list* next;
+	struct obj_list* prev;
+};
+
+
 object_t C_TRUE = {.type = BOOL, .boolean = true};
 object_t C_FALSE = {.type = BOOL, .boolean = false};
 
 extern object_t* eval(object_t* sexp, object_t*);
 extern object_t* evlis(object_t* sexp, object_t*);
 extern object_t* evcon(object_t* cond, object_t*) ;
-extern object_t* apply(object_t*, object_t*);
 extern object_t* appq(object_t*);
 extern int atom(object_t* sexp);
 extern void print_object(object_t*);
