@@ -53,7 +53,7 @@ object_t* make_lambda(object_t* params, object_t* body) {
 }
 
 object_t* make_procedure(object_t* params, object_t* body, object_t* env) {
-	return cons(new_sym("procedure"), cons(params, cons(body, env)));
+	return cons(new_sym("procedure"), cons(params, cons(body, cons(env, &nil))));
 }
 
 
@@ -80,19 +80,18 @@ object_t* evcon(object_t* cond, object_t* env) {
 }
 
 object_t* eval_sequence(object_t* exps, object_t* env) {
-	if (null(cdr(exps)))
+	printf("eval-sequence:");
+	print(car(exps));
+	print(env);
+	if (null(cdr(exps))) {
 		return eval(car(exps), env);
+	}
+	
 	eval(car(exps), env);
 	return eval_sequence(cdr(exps), env);
 }
 
-#define make_frame(var, val) (cons(var, val))
-#define frame_variables(frame) (car(frame))
-#define frame_values(frame) (cdr(frame))
-#define add_binding(var, val, frame) do { frame->car = cons(var, car(frame)); frame->cdr = cons(val, cdr(frame)); } while(0);
-#define first_frame(env) (car(env))
-#define enclosing_env(env) (cdr(env))
-#define extend_env(vars, vals, env) (cons(make_frame(vars, vals), env))
+
 
 object_t* lookup_variable(object_t* var, object_t* env) {
 	while (!null(env)) {
@@ -145,9 +144,7 @@ void define_variable(object_t* var, object_t* val, object_t* env) {
 	add_binding(var, val, frame);
 }
 
-#define procedure_env(p) (cadddr(p))
-#define procedure_body(p) (caddr(p))
-#define procedure_params(p) (cadr(p))
+
 
 /* (define (apply procedure arguments)
   (cond ((primitive-procedure? procedure)
@@ -165,12 +162,12 @@ void define_variable(object_t* var, object_t* val, object_t* env) {
 */
 object_t* apply(object_t* procedure, object_t* arguments) {
 
-	if (procedure->type == PRIM)
+	if (procedure->type == PRIM) {
 		return procedure->primitive(arguments);
+	}
 	else if (is_procedure(procedure)) {
-		return eval_sequence(procedure_body(procedure), \
-			extend_env(procedure_params(procedure), arguments, \
-				procedure_env(procedure)));
+		object_t* env = extend_env(procedure_params(procedure), arguments, procedure_env(procedure));
+		return eval_sequence(procedure_body(procedure), env);
 	}
 	else {
 		print(procedure);
@@ -224,42 +221,52 @@ object_t* apply(object_t* procedure, object_t* arguments) {
 */
 
 object_t* eval(object_t* exp, object_t* env) {
-	if (null(exp))
+	printf("[eval]");
+	print(exp);
+
+tail:
+	if (null(exp)) 
 		return &nil;
-
-	switch(exp->type) {
-		case INT:
-			return exp;
-		case SYM: {
-			return lookup_variable(exp, env);
-		} case CONS: {
-			if (atom(exp->car)) {
-				if(car(exp)->type == SYM) {
-					if (!strcmp(car(exp)->symbol, "define")) {
-						if (atom(cadr(exp))) {
-							define_variable(cadr(exp), eval(caddr(exp), env), env);
-						} else {
-							define_variable(car(cadr(exp)), make_lambda(cdr(cadr(exp)), cddr(exp)), env);
-						}
-						return new_sym("ok");
-					}
-					if (!strcmp(exp->car->symbol, "quote"))
-						return cadr(exp);
-					if (!strcmp(exp->car->symbol, "eq")) 
-						return eq(eval(cadr(exp), env), eval(caddr(exp), env)) ? &C_TRUE : &C_FALSE;
-					if (!strcmp(exp->car->symbol, "atom")) 
-						return atom(eval(cadr(exp), env)) ? &C_TRUE : &C_FALSE;
-					if (!strcmp(exp->car->symbol, "cond")) 
-						return evcon(cdr(exp), env);
-				}
-			}
+ 	else if (is_self_evaluating(exp)) 
+ 		return exp;
+ 	else if (exp->type == SYM)
+ 		return lookup_variable(exp, env);
+ 	else if (is_tagged(exp, quote))
+ 		return cadr(exp);
+ 	else if (is_tagged(exp, new_sym("set!"))) {
+ 		set_variable(cadr(exp), eval(caddr(exp), env), env);
+ 		exp = cadr(exp);
+ 		goto tail;
+ 	} else if (is_tagged(exp, new_sym("define"))) {
+		if ((atom(cadr(exp)))) {
+			define_variable(cadr(exp), eval(caddr(exp), env), env);
+		} else {
+			object_t* closure = eval(make_lambda(cdr(cadr(exp)), cddr(exp)), env);
+			define_variable(car(cadr(exp)), closure, env);
 		}
-	}
-	if (is_lambda(exp))
-		return make_lambda(cadr(exp), cddr(exp));
+		return ok;
+ 	} 
+ 	else if (is_tagged(exp, new_sym("if"))) 
+ 		return ok;
+ 	else if (is_tagged(exp, new_sym("begin"))) {
+ 		exp = eval_sequence(cdr(exp), env);
+ 		goto tail;
+  	}
+ 	else if (is_lambda(exp))
+ 		return make_procedure(cadr(exp), cddr(exp), env);
+ 	else if (is_tagged(exp, new_sym("cond"))) 
+ 		return new_sym("COND");
+ 	else if (!atom(exp)) {
+ 		object_t* proc = eval(car(exp), env);
+ 		object_t* args = evlis(cdr(exp), env);
 
-	return apply(eval(car(exp), env), cdr(exp));
+ 		exp = apply(eval(car(exp), env), evlis(cdr(exp), env));
+ 		goto tail;
+ 	}
+ 	else
+ 		error("Unknown eval!");
 }
+
 
 object_t* append(object_t* pair, object_t* list) {
 	if (null(pair))
@@ -277,15 +284,13 @@ object_t* pair(object_t* x, object_t* y) {
 int main(int argc, char** argv) {
 	char* input = malloc(256);
 	object_t* env = new_cons();
-	// env = append(pair(cons(new_sym("t"), &nil), cons(&C_TRUE, &nil)), env);
-	// env = append(pair(cons(new_sym("f"), &nil), cons(&C_FALSE, &nil)), env);
-	// env = append(pair(cons(new_sym("nil"), &nil), cons(&nil, &nil)), env);
 	lambda = new_sym("lambda");
 	quote = new_sym("quote");
-	object_t* vars = scan("(a b c d)");
-	object_t* vals = scan("(9 7 66 55)");
-	env = extend_env(vars, vals, &nil);
+	ok = new_sym("ok");
+	env = extend_env(scan("(true false)"), cons(&C_TRUE, &C_FALSE), new_cons());
 	init_prim(env);
+	define_variable(new_sym("y"), eval(scan("(lambda(a) a)"), env), env);
+	
 
 	print(env);
 	printf("Welcome to LISP2. Press ! to exit\n");
@@ -295,8 +300,10 @@ int main(int argc, char** argv) {
 		getline(&input, &sz, stdin);
 		if (*input == '!')
 			break;
+		object_t* in = scan(input);
+		print(in);
 		printf("=> ");
-		print(eval(scan(input), env));
+		print(eval(in, env));
 	} while(*input);
 	return 0;
 }

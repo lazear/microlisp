@@ -18,6 +18,18 @@
 #define null(x) ((x) == NULL || (x) == &nil )
 #define arity(x) (__number_of_args(__func__, sexp, x))
 
+#define make_frame(var, val) (cons(var, val))
+#define frame_variables(frame) (car(frame))
+#define frame_values(frame) (cdr(frame))
+#define add_binding(var, val, frame) do { frame->car = cons(var, car(frame)); frame->cdr = cons(val, cdr(frame)); } while(0);
+#define first_frame(env) (car(env))
+#define enclosing_env(env) (cdr(env))
+#define extend_env(vars, vals, env) (cons(make_frame(vars, vals), env))
+#define procedure_env(p) (cadddr(p))
+#define procedure_body(p) (caddr(p))
+#define procedure_params(p) (cadr(p))
+
+
 typedef enum type { INT, SYM, STRING, BOOL, CONS, PROC, PRIM } type_t;
 typedef struct object* (*primitive_t) (struct object*);
 typedef struct object object_t;
@@ -50,7 +62,7 @@ static object_t UNBOUND = { .type = SYM, .symbol = "Unbound variable!"};
 
 static object_t* lambda;
 static object_t* quote;
-
+static object_t *ok;
 
 /* scheme.c */
 extern object_t* eval(object_t* sexp, object_t*);
@@ -75,9 +87,5 @@ extern object_t* new_int(int x);
 /* primitives.c */
 extern void __number_of_args(const char* func, object_t* sexp, int expected);
 
-extern object_t* add(object_t* first, object_t* rest);
-extern object_t* sub(object_t* first, object_t* rest);
-extern object_t* imul(object_t* first, object_t* rest);
-extern object_t* idiv(object_t* first, object_t* rest);
 
 #endif

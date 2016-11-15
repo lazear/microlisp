@@ -114,6 +114,12 @@ void print_object(object_t* obj) {
 				printf("#f");
 			break;
 		case CONS: {
+			if (eq(car(obj), new_sym("procedure"))) {
+				printf("<procedure> ");
+				print_object(cadr(obj));
+				print_object(caddr(obj));
+				return;
+			}
 			printf("(");
 			object_t** t = &obj;
 			while(*t) {
@@ -130,6 +136,7 @@ void print_object(object_t* obj) {
 					break;
 			}
 			printf(")");
+			break;
 		} 
 		case PRIM:
 			printf("#<primitive>");
@@ -233,7 +240,7 @@ object_t* scan(const char* str) {
 	char word[128];
 	memset(word, 0, 128);
 	struct obj_list* ol = new_ol();
-	//printf("input: %s\n", str);
+
 	/* second pass, split strings by the delimiter */
 	for (i = 0; i < strlen(str); i++) {
 		switch(str[i]) {
@@ -249,17 +256,17 @@ object_t* scan(const char* str) {
 				if (quoted && !paren_quote) {
 					ol_pop(&ol);
 					quoted = 0;
+					paren_quote = 0;
 				}
 
 				continue;
 			case '\'':
-				//literal = (literal) ? 0 : 1;
 				quoted = 1;
-				ol_push(&ol);
-					push(ol->val, quote);
+			
+				ol_push(&ol); 
+				push(ol->val, new_sym("quote"));
 				push(ol->prev->val, ol->val);
 				
-	
 				word[idx] = '\0';
 				if (idx) 
 					push(ol->val, tok_to_obj(word));
@@ -285,7 +292,6 @@ object_t* scan(const char* str) {
 				if (d>1) {
 					ol_push(&ol);
 					push(ol->prev->val, ol->val);
-					//ol->prev->val = cons(ol->prev->val, ol->val);
 				}
 
 				idx = 0;
@@ -295,7 +301,6 @@ object_t* scan(const char* str) {
 				word[idx] = '\0';
 				if (idx)
 					push(ol->val, tok_to_obj(word));
-					//ol->val = cons(ol->val, tok_to_obj(word));
 				if(d>0)
 					ol_pop(&ol);
 
@@ -316,20 +321,13 @@ object_t* scan(const char* str) {
 	}
 
 	word[idx] = '\0';
-	//if (ol->val->cdr == NULL)
 
 	if (idx) 
 		push(ol->val, tok_to_obj(word));
-
-
 	if(!literal) {
-		if (quoted) {
-			//return cons(new_sym("quote"),ol->val);
+		if (quoted) 
 			return ol->val;
-		}
 		return ol->val->car;
 	}
-
-
 	return ol->val; 
 }
