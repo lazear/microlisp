@@ -9,4 +9,6 @@ lisp1 defines only the primitives described in McCarthy's paper - namely quote, 
 
 2. lisp2 contains several extensions, including the scheme-style "define" keyword, which constructs lambda expressions from, i.e. '(define (next item) (cdr item))' would be translated into '(define next (lambda (item) (cdr item))', but this does not allow returning of closures. In addition, the arithmetic primitives (*, /, +, -) have been added.
 
+3. The scheme folder contains a minimal implementation of scheme. Currently working on tail call optimization, as laid out in the standard
+
 [1]: http://www-formal.stanford.edu/jmc/recursive.pdf
