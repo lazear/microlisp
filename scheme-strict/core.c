@@ -87,7 +87,7 @@ object_t* new_sym(char* s) {
 	switch(one->type) {
 		case INT:
 			return one->integer == two->integer;
-		case SYM: case STRING:
+		case SYM:
 			return strcmp(one->symbol, two->symbol) == 0;
 		case BOOL:
 			return one->boolean == two->boolean;
@@ -130,7 +130,10 @@ void print_object(object_t* obj) {
 					break;
 			}
 			printf(")");
-		}
+		} 
+		case PRIM:
+			printf("#<primitive>");
+			break;
 	}
 }
 
@@ -253,7 +256,7 @@ object_t* scan(const char* str) {
 				//literal = (literal) ? 0 : 1;
 				quoted = 1;
 				ol_push(&ol);
-					push(ol->val, new_sym("quote"));
+					push(ol->val, quote);
 				push(ol->prev->val, ol->val);
 				
 	
