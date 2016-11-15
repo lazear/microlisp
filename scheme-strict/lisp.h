@@ -24,7 +24,7 @@
 #define add_binding(var, val, frame) do { frame->car = cons(var, car(frame)); frame->cdr = cons(val, cdr(frame)); } while(0);
 #define first_frame(env) (car(env))
 #define enclosing_env(env) (cdr(env))
-#define extend_env(vars, vals, env) (cons(make_frame(vars, vals), env))
+//#define extend_env(vars, vals, env) (cons(make_frame(vars, vals), env))
 #define procedure_env(p) (cadddr(p))
 #define procedure_body(p) (caddr(p))
 #define procedure_params(p) (cadr(p))
@@ -56,14 +56,21 @@ struct obj_list {
 };
 
 
-static object_t C_TRUE = {.type = BOOL, .boolean = true};
-static object_t C_FALSE = {.type = BOOL, .boolean = false};
+static object_t __true = {.type = BOOL, .boolean = true};
+static object_t __false = {.type = BOOL, .boolean = false};
 static object_t UNBOUND = { .type = SYM, .symbol = "Unbound variable!"};
 
-static object_t* lambda;
-static object_t* quote;
-static object_t *ok;
-
+static object_t* LAMBDA;
+static object_t* QUOTE;
+static object_t* OK;
+static object_t* PROCEDURE;
+static object_t* BEGIN;
+static object_t* IF;
+static object_t* COND;
+static object_t* SET;
+static object_t* DEFINE;
+static object_t* TRUE = &__true;
+static object_t* FALSE = &__false;
 /* scheme.c */
 extern object_t* eval(object_t* sexp, object_t*);
 extern object_t* evlis(object_t* sexp, object_t*);

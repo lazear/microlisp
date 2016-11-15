@@ -154,9 +154,9 @@ s:
 		case '#':
 			token++;
 			if (*token == 't')
-				return &C_TRUE;
+				return TRUE;
 			if (*token == 'f')
-				return &C_FALSE;
+				return FALSE;
 			goto s;
 			
 		case '(':
@@ -262,7 +262,7 @@ object_t* scan(const char* str) {
 				continue;
 			case '\'':
 				quoted = 1;
-			
+	
 				ol_push(&ol); 
 				push(ol->val, new_sym("quote"));
 				push(ol->prev->val, ol->val);
@@ -329,5 +329,11 @@ object_t* scan(const char* str) {
 			return ol->val;
 		return ol->val->car;
 	}
+		if (quoted) {
+					quoted = 0;
+					ol_pop(&ol);
+					paren_quote = 0;
+				}
+
 	return ol->val; 
 }

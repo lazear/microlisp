@@ -65,14 +65,21 @@ object_t* p_div(object_t* sexp) {
 
 object_t* p_gt(object_t* sexp) {
 	arity(2);
-	return (car(sexp)->integer > cadr(sexp)->integer) ? \
-		&C_TRUE : &C_FALSE;
+	return (car(sexp)->integer > cadr(sexp)->integer) ? TRUE : FALSE;
 }
 
 object_t* p_lt(object_t* sexp) {
 	arity(2);
-	return (car(sexp)->integer < cadr(sexp)->integer) ? \
-		&C_TRUE : &C_FALSE;
+	return (car(sexp)->integer < cadr(sexp)->integer) ? TRUE : FALSE;
+}
+
+object_t* p_eq(object_t* sexp) {
+	arity(2);
+	return eq(car(sexp), cadr(sexp)) ? 	TRUE : FALSE;
+}
+
+object_t* p_atom(object_t* sexp) {
+	return atom(car(sexp)) ? TRUE : FALSE;
 }
 
 object_t* p_cons(object_t* sexp) {
@@ -108,4 +115,6 @@ object_t* init_prim(object_t* env) {
 	add_proc("/", p_div);
 	add_proc(">", p_gt);
 	add_proc("<", p_gt);
+	add_proc("eq", p_eq);
+	add_proc("atom?", p_atom);
 }
