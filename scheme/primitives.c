@@ -94,7 +94,19 @@ object_t* p_car(object_t* sexp) {
 object_t* p_cdr(object_t* sexp) {
 	return cdr(car(sexp));
 }
+object_t* p_null(object_t* sexp) {
+	return null(car(sexp)) ? TRUE : FALSE;
+}
 
+object_t* p_pair (object_t* exp) {
+	if (car(exp)->type == CONS)
+		return (caar(exp)->type != CONS && cdr(car(exp))->type != CONS) ? TRUE : FALSE;
+	return FALSE;
+}
+
+object_t* p_listq(object_t* exp) {
+	return (car(exp)->type == CONS && p_pair(exp) != TRUE) ? TRUE : FALSE;
+}
 
 object_t* new_primitive(primitive_t op) {
 	object_t* p = new();
@@ -114,7 +126,10 @@ object_t* init_prim(object_t* env) {
 	add_proc("*", p_mul);
 	add_proc("/", p_div);
 	add_proc(">", p_gt);
-	add_proc("<", p_gt);
+	add_proc("<", p_lt);
 	add_proc("eq", p_eq);
 	add_proc("atom?", p_atom);
+	add_proc("null?", p_null);
+	add_proc("pair?", p_pair);
+	add_proc("list?", p_listq);
 }

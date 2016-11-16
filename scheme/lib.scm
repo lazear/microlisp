@@ -1,0 +1,2 @@
+(define map (lambda (f a) (if (null? (cdr a)) (f (car a)) (cons (f (car a)) (map f (cdr a))))))
+(define (sum-of-squares-tail-recursive num-list) (define sos-helper (lambda (remaining sum-so-far) (if (null? remaining) sum-so-far (sos-helper (cdr remaining) (+ (* (car remaining) (car remaining)) sum-so-far))))) (sos-helper num-list 0))

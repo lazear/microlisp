@@ -27,11 +27,9 @@ object_t* make_procedure(object_t* params, object_t* body, object_t* env) {
 }
 
 object_t* evlis(object_t* sexp, object_t* env) {
-	if (null(sexp))
+	if ( null(sexp))
 		return &nil;
 	object_t* first = eval(car(sexp), env);
-	if (null(cdr(sexp)))
-		return cons(first, NULL);
 	return cons(first, evlis(cdr(sexp), env));
 }
 
@@ -46,9 +44,9 @@ object_t* eval_sequence(object_t* exps, object_t* env) {
 }
 
 object_t* extend_env(object_t* var, object_t* val, object_t* env) {
-	printf("EXTEND-ENV");
-	print(cons(var, val));
-	print(lookup_variable(var, env));
+	// printf("EXTEND-ENV");
+	// print(cons(var, val));
+	// print(lookup_variable(var, env));
 	return cons(cons(var, val), env);
 }
 
@@ -201,34 +199,25 @@ tail:
  		exp = car(args);
  		goto tail;
   	}
- 	else if (is_tagged(exp, LAMBDA)) {
+ 	else if (is_tagged(exp, LAMBDA)) 
  		return make_procedure(cadr(exp), cddr(exp), env);
- 	}
  	else if (is_tagged(exp, COND)) 
  		return new_sym("COND");
  	else if (!atom(exp)) {
  		object_t* proc = eval(car(exp), env);
 		object_t* args = evlis(cdr(exp), env);
-
+		if (proc->type == PRIM)
+			return proc->primitive(args);
 		if (is_tagged(proc, PROCEDURE)) {
 			env = extend_env(procedure_params(proc), args, procedure_env(proc));
- 			exp = procedure_body(proc);
-			while(!null(cdr(exp))) {
-				eval(car(exp), env);
-				exp = cdr(exp);
-			}
-			exp = car(exp);
- 			//exp = cons(BEGIN, procedure_body(proc));
+ 			exp = cons(BEGIN, procedure_body(proc));
  			goto tail;
  		}
- 	// // 	else {
- 			
- 			return apply(proc, args);
- 			
- 		
+		return apply(proc, args);		
  	}
- 	else
+ 	else {
  		error("Unknown eval!");
+ 	}
 }
 
 /*
@@ -256,8 +245,11 @@ int main(int argc, char** argv) {
 	/* Initialize initial environment */
 	env = extend_env(scan("(true false)"), cons(TRUE, FALSE), new_cons());
 	init_prim(env);
+	eval(scan("(define #t true)"), env);
+	eval(scan("(define #f false)"), env);
 	eval(scan("(define = eq)"), env);
 	eval(scan("(define factorial (lambda(n) (if (= n 0) 1 (* n (factorial (- n 1))))))"), env);
+	eval(scan("(define (sum-of-squares num-list) (define sos-helper (lambda (remaining sum-so-far) (if (null? remaining) sum-so-far (sos-helper (cdr remaining) (+ (* (car remaining) (car remaining)) sum-so-far))))) (sos-helper num-list 0))"), env);
 	//print(eval(scan("(factorial 5)"), env));
 	printf("LITH ITH LITHENING...\n");
 	size_t sz;
