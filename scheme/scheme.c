@@ -48,6 +48,7 @@ object_t* eval_sequence(object_t* exps, object_t* env) {
 object_t* extend_env(object_t* var, object_t* val, object_t* env) {
 	printf("EXTEND-ENV");
 	print(cons(var, val));
+	print(lookup_variable(var, env));
 	return cons(cons(var, val), env);
 }
 
@@ -207,15 +208,21 @@ tail:
  		return new_sym("COND");
  	else if (!atom(exp)) {
  		object_t* proc = eval(car(exp), env);
+		object_t* args = evlis(cdr(exp), env);
 
 		if (is_tagged(proc, PROCEDURE)) {
-			env = extend_env(procedure_params(proc), evlis(cdr(exp), env), procedure_env(proc));
- 			//env = cons(make_frame(procedure_params(proc), evlis(cdr(exp), env)), procedure_env(proc));
- 			exp = cons(BEGIN, procedure_body(proc));
+			env = extend_env(procedure_params(proc), args, procedure_env(proc));
+ 			exp = procedure_body(proc);
+			while(!null(cdr(exp))) {
+				eval(car(exp), env);
+				exp = cdr(exp);
+			}
+			exp = car(exp);
+ 			//exp = cons(BEGIN, procedure_body(proc));
  			goto tail;
  		}
- 	// 	else {
- 			object_t* args = evlis(cdr(exp), env);
+ 	// // 	else {
+ 			
  			return apply(proc, args);
  			
  		
