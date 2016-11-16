@@ -78,7 +78,9 @@ extern object_t* evcon(object_t* cond, object_t*) ;
 extern object_t* appq(object_t*);
 extern object_t* append(object_t* pair, object_t* list);
 extern object_t* pair(object_t* x, object_t* y) ;
-
+extern object_t* extend_env(object_t* , object_t* , object_t* );
+extern void define_variable(object_t* , object_t* , object_t* );
+extern object_t* lookup_variable (object_t* , object_t* );
 /* core.c */
 extern int atom(object_t* sexp);
 extern void print_object(object_t*);

@@ -23,16 +23,20 @@ object_t* make_lambda(object_t* params, object_t* body) {
 
 object_t* make_procedure(object_t* params, object_t* body, object_t* env) {
 	return cons(PROCEDURE, cons(params, cons(body, cons(env, &nil))));
+	//return cons(PROCEDURE, cons(params, cons(body, env)));
 }
 
 object_t* evlis(object_t* sexp, object_t* env) {
 	if (null(sexp))
 		return &nil;
 	object_t* first = eval(car(sexp), env);
+	if (null(cdr(sexp)))
+		return cons(first, NULL);
 	return cons(first, evlis(cdr(sexp), env));
 }
 
 object_t* eval_sequence(object_t* exps, object_t* env) {
+	print(car(exps));
 	if (null(cdr(exps))) {
 		return eval(car(exps), env);
 	}
@@ -42,7 +46,8 @@ object_t* eval_sequence(object_t* exps, object_t* env) {
 }
 
 object_t* extend_env(object_t* var, object_t* val, object_t* env) {
-
+	printf("EXTEND-ENV");
+	print(cons(var, val));
 	return cons(cons(var, val), env);
 }
 
@@ -113,19 +118,17 @@ void define_variable(object_t* var, object_t* val, object_t* env) {
           "Unknown procedure type - APPLY" procedure))))
 */
 object_t* apply(object_t* procedure, object_t* arguments) {
-	if (procedure->type == PRIM) {
+	if (procedure->type == PRIM) 
 		return procedure->primitive(arguments);
-	}
 	else if (is_tagged(procedure, PROCEDURE)) {
 		object_t* env = extend_env(procedure_params(procedure), arguments, procedure_env(procedure));
 		return eval_sequence(procedure_body(procedure), env);
 	}
 	else {
-		printf("Error in apply: ");
 		print(procedure);
-		print(arguments);
 		error("Unknown procedure type");
 	}
+
 }
 
 
@@ -158,18 +161,13 @@ object_t* apply(object_t* procedure, object_t* arguments) {
 object_t* eval(object_t* exp, object_t* env) {
 //printf("EVAL\n");
 tail:
+	//print(env);
 	if (null(exp)) 
 		return &nil;
- 	else if (exp->type == INT || exp->type == STRING)
+ 	else if (exp->type == INT || exp->type == STRING) 
  		return exp;
- 	else if (exp->type == SYM) {
- 		object_t* ret = lookup_variable(exp, env);
- 		if (ret == &UNBOUND) {
- 			print(exp);
- 			error("Unbound variable!");
- 		}
- 		return ret;
- 	}
+ 	else if (exp->type == SYM) 
+ 		return lookup_variable(exp, env);
  	else if (is_tagged(exp, QUOTE))
  		return cadr(exp);
  	else if (is_tagged(exp, SET)) {
@@ -189,7 +187,6 @@ tail:
   		object_t* predicate = eval(cadr(exp), env);
  		object_t* consequent = caddr(exp);
  		object_t* alternative = cadddr(exp);
-
  		if (!eq(predicate, FALSE)) 
  			exp = consequent;
  		else 
@@ -197,35 +194,38 @@ tail:
  		goto tail;
  	}
  	else if (is_tagged(exp, BEGIN)) {
- 		exp = eval_sequence(cdr(exp), env);
+ 		object_t* args = cdr(exp);
+ 		for (; !null(cdr(args)); args = cdr(args))
+ 			eval(car(args), env);
+ 		exp = car(args);
  		goto tail;
   	}
- 	else if (is_tagged(exp, LAMBDA))
+ 	else if (is_tagged(exp, LAMBDA)) {
  		return make_procedure(cadr(exp), cddr(exp), env);
+ 	}
  	else if (is_tagged(exp, COND)) 
  		return new_sym("COND");
  	else if (!atom(exp)) {
  		object_t* proc = eval(car(exp), env);
- 		object_t* args = evlis(cdr(exp), env);
- 	// 	print(env);
-		// if (proc->type == PRIM)
-		// 	return proc->primitive(args);
 
- 	// 	if (is_tagged(proc, PROCEDURE)) {
- 	// 		env = extend_env(procedure_params(proc), args, procedure_env(proc));
- 	// 		proc->cdr->cdr->cdr->car = env;
- 	// 		exp = cons(BEGIN, procedure_body(proc));
- 	// 		goto tail;
- 	// 	}
-
- 		return apply(proc, args);
+		if (is_tagged(proc, PROCEDURE)) {
+			env = extend_env(procedure_params(proc), evlis(cdr(exp), env), procedure_env(proc));
+ 			//env = cons(make_frame(procedure_params(proc), evlis(cdr(exp), env)), procedure_env(proc));
+ 			exp = cons(BEGIN, procedure_body(proc));
+ 			goto tail;
+ 		}
+ 	// 	else {
+ 			object_t* args = evlis(cdr(exp), env);
+ 			return apply(proc, args);
+ 			
+ 		
  	}
  	else
  		error("Unknown eval!");
 }
 
 /*
-(define factorial (lambda(n) (if (= n 0) 1 (* n (factorial (- n 1))))))
+(define factorial (lambda(n) (if (< n 1) 1 (* n (factorial (- n 1))))))
 (define (fact n) (if (= n 0) 1 (* n (factorial (- n 1)))))
 (define (fact n) (define (product min max) (if (= min n) max (product (+ 1 min) (* min max))))(product 1 n))
       
@@ -240,6 +240,7 @@ int main(int argc, char** argv) {
 	QUOTE 		= new_sym("quote");
 	OK 			= new_sym("ok");
 	PROCEDURE 	= new_sym("procedure");
+	//PROCEDURE->type = PROC;
 	BEGIN 		= new_sym("begin");
 	IF 			= new_sym("if");
 	COND 		= new_sym("cond");
@@ -249,7 +250,7 @@ int main(int argc, char** argv) {
 	env = extend_env(scan("(true false)"), cons(TRUE, FALSE), new_cons());
 	init_prim(env);
 	eval(scan("(define = eq)"), env);
-	//eval(scan("(define factorial (lambda(n) (if (= n 0) 1 (* n (factorial (- n 1))))))"), env);
+	eval(scan("(define factorial (lambda(n) (if (= n 0) 1 (* n (factorial (- n 1))))))"), env);
 	//print(eval(scan("(factorial 5)"), env));
 	printf("LITH ITH LITHENING...\n");
 	size_t sz;
