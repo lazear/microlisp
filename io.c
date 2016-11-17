@@ -4,7 +4,6 @@
 #include <string.h>
 #include <stdarg.h>
 
-
 #define null(x) ((x) == NULL || (x) == NIL)
 #define atom(x) (!null(x) && (x)->type != LIST)
 #define cons(x, y) (new(LIST, x, y))
@@ -100,13 +99,20 @@ sexp_t* tokenize(char* token) {
 	return NIL;
 }
 
-sexp_t* read(FILE* in, int depth) {
+/* global variables for read() */
+int PDEPTH = 0;
+
+/* function read(in) reads one full closure from the input file stream, and 
+returns a S-expression */
+sexp_t* read(FILE* in) {
 	char* buffer = malloc(256);
 	char c = ' ';
 	int index = 0;
-	int i;
 	int literal = 1;
+	static int stop = 1;
+	int i;
 
+/* macro for tokenizing buffer and resetting the input */
 #define append() \
 	if (index) {\
 		buffer[index] = '\0';\
@@ -116,49 +122,70 @@ sexp_t* read(FILE* in, int depth) {
 		exp->type = LIST;\
 		index = 0;\
 	}
-
 	sexp_t* exp = new(LIST, NULL, NULL);
 	sexp_t* ret = exp;
 	while((c = getc(in)) != EOF){
 		
 		if (c == ' ') {
 			append();
-		}
-		else if (c == '\n') {
-			append();
-			for (i = 0; i < depth; i++)
-				printf("..");
-			// if (depth == 0)
-			// 	break;
-		} else {	
-			if (c == '\'') {
-				exp->car = new(LIST, new(SYMBOL, "quote"), read(in, depth));
-				exp->cdr = new(LIST, NIL, NULL);
-				exp = exp->cdr;
-			}		
-			else if (c == '(') {
-				literal = 0;
-				append();
-				depth++;
-				if (depth > 1) {
-					exp->car = read(in, depth);
-					exp->cdr = malloc(sizeof(sexp_t));
-					exp = exp->cdr;
-					exp->type = LIST;
-					index = 0;
-				}
-			}
-			else if (c == ')') {
-				depth--;
+			if (stop == 1)
 				break;
-			}	
-			else
-				buffer[index++] = c;
+			continue;
+		}
+		if (c == '\n') {
+			append();
+			for (i = 0; i < PDEPTH; i++)
+				printf("..");
+			if (stop == 1)
+				break;
+			continue;
+		} 
+		if (c == '\'') {
+			stop = (literal) ? 1 : 2;
+			sexp_t* e = read(in);
+			exp->car = cons(new(SYMBOL, "quote"), cons(e, NIL));
+			exp->cdr = malloc(sizeof(sexp_t));
+			exp = exp->cdr;
+			exp->type = LIST;
+			break;
 		}		
+		else if (c == '(') {	
+			append();
+			literal = 0;
+			stop = 0;
+			PDEPTH++;
+			if (PDEPTH > 1) {
+				exp->car = read(in);
+				exp->cdr = malloc(sizeof(sexp_t));
+				exp = exp->cdr;
+				exp->type = LIST;
+				index = 0;
+			}
+			if (PDEPTH == 0)
+				break;
+		}
+		else if (c == ')') {
+			PDEPTH--;
+			if (PDEPTH == 0)
+				break;
+			if (stop)
+				break;
+		}
+		else
+			buffer[index++] = c;
+
+		
+
+	
+			
 	}
 	append();
+	free(buffer);
+	//stop = 0;
 	if (null(ret->car))
 		return NIL;
+	if (literal) 
+		return ret->car;
 
 	return ret;
 }
@@ -170,7 +197,7 @@ int main(int argc, char** argv) {
 	while(1) {
 		
 		printf("user> ");
-		in = read(stdin, 0);
+		in = read(stdin);
 	
 		printf("=> ");
 		print_exp(in);
