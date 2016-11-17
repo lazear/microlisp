@@ -11,6 +11,8 @@
 
 enum token_type { SYMBOL, INTEGER, STRING, LIST };
 typedef struct sexp sexp_t;
+sexp_t *NIL;
+sexp_t *EMPTY_LIST;
 
 struct sexp {
 	enum token_type type;
@@ -23,9 +25,6 @@ struct sexp {
 		};
 	};
 };
-
-sexp_t *NIL;
-sexp_t *EMPTY_LIST;
 
 sexp_t* new(enum token_type type, ...) {
 	va_list ap;
@@ -48,9 +47,8 @@ sexp_t* new(enum token_type type, ...) {
 }
 
 void print_exp(sexp_t* exp) {
-	if (null(exp)) {
+	if (null(exp))
 		return;
-	}
 	switch(exp->type) {
 		case SYMBOL: case STRING:
 			printf("%s", exp->string);
@@ -60,12 +58,22 @@ void print_exp(sexp_t* exp) {
 			break;
 		case LIST:
 			printf("(");
-			print_exp(exp->car);
-			if (!null(exp->cdr)) {
-				printf(" . ");
-				print_exp(exp->cdr);
-			}
-			
+			sexp_t** t = &exp;
+			while(!null(*t)) {
+				print_exp((*t)->car);
+				if (!null((*t)->cdr)) {
+					printf(" ");
+					if ((*t)->cdr->type == LIST) {
+						t = &(*t)->cdr;						
+					}
+					else{
+						printf(". ");
+						print_exp((*t)->cdr);
+						break;
+					}
+				} else
+					break;
+			}				
 			printf(")");
 	}
 }
@@ -91,94 +99,82 @@ sexp_t* tokenize(char* token) {
 	}
 	return NIL;
 }
-void push(sexp_t* list, sexp_t* obj) {
-	sexp_t** t;
-	if (list->car == NIL || list->car == EMPTY_LIST) {
-		list->car = obj;
-		return;
-	}
-	for (t = &list; !null(*t); t = &(*t)->cdr)
-		;
-	(*t) = new(LIST, obj, NIL); //new(LIST, NIL, NIL));
-}
 
-void eat(FILE* in) {
-	int c;
-	while ((c = getc(in))!= EOF) {
-		if (c == ' ')
-			continue;
-		else if (c == ';') {
-			while (((c = getc(in))!= EOF) && (c != '\n'))
-				continue;
-		}
-		ungetc(c, in);
-		break;
-	} 
-}
-sexp_t* convert(char* string) {
-	return new(STRING, string);
-}
-
-
-sexp_t* read(FILE* in) {
-	char buffer[100];
+sexp_t* read(FILE* in, int depth) {
+	char* buffer = malloc(256);
 	char c = ' ';
 	int index = 0;
-
-	while(c != EOF) {
-		c = getc(in);
-		if (c == ' ' || c == '\n')
-			break;
-		if (c == '(' || c == ')') {
-			ungetc(c, in);
-			break;
-		}
-		buffer[index++] = c;
-	}
-	buffer[index] = '\0';
-	return tokenize(buffer);
-}
-
-
-sexp_t* repl(FILE* in) {
-	char c = ' ';
 	int i;
-	int index = 0;
-	int depth = 0;
+	int literal = 1;
 
-	sexp_t* ret = new(LIST, NIL, NIL);
-
-	while(c != EOF) {
-		eat(in);
-		c = getc(in);
-		switch (c) {
-			case '(':
-				depth++;
-				if 
-				ret = cons()
-				break;
-			case ')':
-				depth--;
-				if (depth == 0)
-					return ret;
-				break;
-			default:
-				ungetc(c, in);
-				push(ret, read(in));
-				
-				//print_exp(read(in));
-		}
-
+#define append() \
+	if (index) {\
+		buffer[index] = '\0';\
+		exp->car = tokenize(buffer);\
+		exp->cdr = malloc(sizeof(sexp_t));\
+		exp = exp->cdr;\
+		exp->type = LIST;\
+		index = 0;\
 	}
+
+	sexp_t* exp = new(LIST, NULL, NULL);
+	sexp_t* ret = exp;
+	while((c = getc(in)) != EOF){
+		
+		if (c == ' ') {
+			append();
+		}
+		else if (c == '\n') {
+			append();
+			for (i = 0; i < depth; i++)
+				printf("..");
+			// if (depth == 0)
+			// 	break;
+		} else {	
+			if (c == '\'') {
+				exp->car = new(LIST, new(SYMBOL, "quote"), read(in, depth));
+				exp->cdr = new(LIST, NIL, NULL);
+				exp = exp->cdr;
+			}		
+			else if (c == '(') {
+				literal = 0;
+				append();
+				depth++;
+				if (depth > 1) {
+					exp->car = read(in, depth);
+					exp->cdr = malloc(sizeof(sexp_t));
+					exp = exp->cdr;
+					exp->type = LIST;
+					index = 0;
+				}
+			}
+			else if (c == ')') {
+				depth--;
+				break;
+			}	
+			else
+				buffer[index++] = c;
+		}		
+	}
+	append();
+	if (null(ret->car))
+		return NIL;
+
 	return ret;
 }
 
 int main(int argc, char** argv) {
 	printf("REPL\n");
-	//print_exp(cons(cons(new(INTEGER, 9), new(INTEGER, 10)), NIL));
+	print_exp(cons(cons(new(INTEGER, 9), new(INTEGER, 10)), new(INTEGER, 82)));
+	sexp_t* in;
 	while(1) {
-		//print_exp(read(stdin));
-		print_exp(repl(stdin));
+		
+		printf("user> ");
+		in = read(stdin, 0);
+	
+		printf("=> ");
+		print_exp(in);
 		printf("\n");
+		
 	}
 }

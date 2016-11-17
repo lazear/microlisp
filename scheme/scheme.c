@@ -229,7 +229,7 @@ tail:
       */
 
 int main(int argc, char** argv) {
-	char* input = malloc(256);
+	char* input;
 	object_t* env = new_cons();
 	/* Initialize static keywords */
 	LAMBDA 		= new_sym("lambda");
@@ -255,13 +255,15 @@ int main(int argc, char** argv) {
 	size_t sz;
 	do {
 		printf("user> ");
+		//input = read(stdin);
 		getline(&input, &sz, stdin);
 		if (*input == '!')
 			break;
 		object_t* in = scan(input);
 		//print(in);
+		//free(input);
 		printf("=> ");
 		print(eval(in, env));
-	} while(*input);
+	} while(input);
 	return 0;
 }

@@ -337,3 +337,32 @@ object_t* scan(const char* str) {
 
 	return ol->val; 
 }
+
+char* read(FILE* in) {
+	char* buffer = malloc(256);
+	char c;
+	int depth = 0;
+	int index = 0;
+	int i = 0;
+	while((c = getc(in)) != EOF) {
+		//c = getc(in);
+		if (c == '\n') {
+			for (i = 0; i < depth; i++)
+				printf("..");
+			if (depth == 0)
+				break;
+			c =' ';
+		}
+		buffer[index++] = c;
+		if (c == '(')
+			depth++;
+		if (c == ')') {
+			depth--;
+			if (depth == 0) 
+			break;
+		}
+		
+	}
+	buffer[index] = '\0';
+	return buffer; //tokenize(buffer);
+}
