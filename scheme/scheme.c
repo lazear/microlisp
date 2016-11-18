@@ -25,22 +25,17 @@ object_t* make_lambda(object_t* params, object_t* body) {
 
 object_t* make_procedure(object_t* params, object_t* body, object_t* env) {
 	return cons(PROCEDURE, cons(params, cons(body, cons(env, &nil))));
-	//return cons(PROCEDURE, cons(params, cons(body, env)));
 }
 
 object_t* evlis(object_t* sexp, object_t* env) {
 	if ( null(sexp))
 		return &nil;
-	object_t* ret = cons(eval(car(sexp), env), evlis(cdr(sexp), env));
-	return ret;
+	return cons(eval(car(sexp), env), evlis(cdr(sexp), env));
 }
 
 object_t* eval_sequence(object_t* exps, object_t* env) {
-	//print(car(exps));
-	if (null(cdr(exps))) {
+	if (null(cdr(exps))) 
 		return eval(car(exps), env);
-	}
-	
 	eval(car(exps), env);
 	return eval_sequence(cdr(exps), env);
 }
@@ -157,9 +152,7 @@ object_t* apply(object_t* procedure, object_t* arguments) {
 */
 
 object_t* eval(object_t* exp, object_t* env) {
-
 tail:
-	printf("%zu\n", (unsigned long long) env);
 	if (null(exp)) 
 		return &nil;
  	if (exp->type == INT || exp->type == STRING) 
@@ -181,10 +174,6 @@ tail:
 		}
 		return OK;
  	} 
- 	else if (is_tagged(exp, new_sym("print"))) {
- 		print((object_t*) cadr(exp)->integer );
- 		return OK;
- 	}
  	else if (is_tagged(exp, IF))  {
   		object_t* predicate = eval(cadr(exp), env);
  		object_t* consequent = caddr(exp);
@@ -210,42 +199,19 @@ tail:
  		object_t* proc = eval(car(exp), env);
 		object_t* args = evlis(cdr(exp), env);
 		
-			if (proc->type == PRIM) {
-				// printf("primitive:");
-				// print_object((cdr(exp)));
-				// print(args);
-
-				return proc->primitive(args);
-			}
-			if (is_tagged(proc, PROCEDURE)) {
-				env = extend_env(procedure_params(proc), args, procedure_env(proc));
-	 			//exp = cons(BEGIN, procedure_body(proc));
-	 			exp = procedure_body(proc);
-	 			while(!null(cdr(exp))){
-	 				printf("loop one");
-	 				print(eval(car(exp), env));
-
-	 				exp = cdr(exp);
-	 			}
-	 			printf("no loop\n");
-	 			exp = car(exp);
-	 			print(env);
-	 			goto tail;
-	 		}
-		return apply(proc, args);		
+		if (proc->type == PRIM) 
+			return proc->primitive(args);
+		else if (is_tagged(proc, PROCEDURE)) {
+			env = extend_env(procedure_params(proc), args, procedure_env(proc));
+ 			exp = cons(BEGIN, procedure_body(proc));
+ 			goto tail;
+ 		}
+		//return apply(proc, args);		
  	}
  	else {
  		error("Unknown eval!");
  	}
 }
-
-/*
-(define factorial (lambda(n) (if (< n 1) 1 (* n (factorial (- n 1))))))
-(define (fact n) (if (= n 0) 1 (* n (factorial (- n 1)))))
-(define (fact n) (define (product min max) (if (= min n) max (product (+ 1 min) (* min max))))(product 1 n))
-      
-(define (fact-iter product counter max-count) (if (> counter max-count) product (fact-iter (* counter product) (+ counter 1) max-count)))
-      */
 
 int main(int argc, char** argv) {
 	char* input;

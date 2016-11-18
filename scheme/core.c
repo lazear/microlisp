@@ -115,9 +115,7 @@ void print_object(object_t* obj) {
 			break;
 		case CONS: {
 			if (eq(car(obj), new_sym("procedure"))) {
-				printf("<procedure> ");
-				//print_object(cadr(obj));
-				//print_object(caddr(obj));
+				printf("<closure> ");
 				return;
 			}
 			printf("(");
@@ -139,7 +137,7 @@ void print_object(object_t* obj) {
 			break;
 		} 
 		case PRIM:
-			//printf("#<primitive>");
+			printf("<primitive>");
 			break;
 	}
 }
@@ -148,7 +146,6 @@ object_t* tok_to_obj(char* token) {
 	if (!token) return;
 	int string = 0;
 	int quote = 0;
-//	printf("token: %s]\n", token);
 s:
 	switch(*token) {
 		case '#':
