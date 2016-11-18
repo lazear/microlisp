@@ -240,13 +240,14 @@ int main(int argc, char** argv) {
 	do {
 		printf("user> ");
 		//input = read(stdin);
-		getline(&input, &sz, stdin);
+		//getline(&input, &sz, stdin);
 		if (*input == '!')
 			break;
+		input = read(stdin);
 		object_t* in = scan(input);
 		//print(in);
 		//free(input);
-		printf("=> ");
+		printf("====> ");
 		print(eval(in, GLOBAL_ENV));
 	} while(input);
 	return 0;

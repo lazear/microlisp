@@ -355,8 +355,6 @@ char* read(FILE* in) {
 			depth++;
 		if (c == ')') {
 			depth--;
-			if (depth == 0) 
-			break;
 		}
 		
 	}
