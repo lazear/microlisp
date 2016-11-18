@@ -11,6 +11,8 @@ atom, eq, car, cdr, cons
 #include <stdarg.h>
 #include "lisp.h"
 
+object_t* GLOBAL_ENV;
+
 bool is_tagged(object_t* exp, object_t* tag) {
 	if (!null(exp) && exp->type == CONS)
 		return eq(car(exp), tag);
@@ -29,12 +31,12 @@ object_t* make_procedure(object_t* params, object_t* body, object_t* env) {
 object_t* evlis(object_t* sexp, object_t* env) {
 	if ( null(sexp))
 		return &nil;
-	object_t* first = eval(car(sexp), env);
-	return cons(first, evlis(cdr(sexp), env));
+	object_t* ret = cons(eval(car(sexp), env), evlis(cdr(sexp), env));
+	return ret;
 }
 
 object_t* eval_sequence(object_t* exps, object_t* env) {
-	print(car(exps));
+	//print(car(exps));
 	if (null(cdr(exps))) {
 		return eval(car(exps), env);
 	}
@@ -44,9 +46,6 @@ object_t* eval_sequence(object_t* exps, object_t* env) {
 }
 
 object_t* extend_env(object_t* var, object_t* val, object_t* env) {
-	// printf("EXTEND-ENV");
-	// print(cons(var, val));
-	// print(lookup_variable(var, env));
 	return cons(cons(var, val), env);
 }
 
@@ -158,12 +157,12 @@ object_t* apply(object_t* procedure, object_t* arguments) {
 */
 
 object_t* eval(object_t* exp, object_t* env) {
-//printf("EVAL\n");
+
 tail:
-	//print(env);
+	printf("%zu\n", (unsigned long long) env);
 	if (null(exp)) 
 		return &nil;
- 	else if (exp->type == INT || exp->type == STRING) 
+ 	if (exp->type == INT || exp->type == STRING) 
  		return exp;
  	else if (exp->type == SYM) 
  		return lookup_variable(exp, env);
@@ -172,7 +171,7 @@ tail:
  	else if (is_tagged(exp, SET)) {
  		set_variable(cadr(exp), eval(caddr(exp), env), env);
  		exp = cadr(exp);
- 		goto tail;
+ 		return OK;
  	} else if (is_tagged(exp, DEFINE)) {
 		if ((atom(cadr(exp)))) {
 			define_variable(cadr(exp), eval(caddr(exp), env), env);
@@ -182,6 +181,10 @@ tail:
 		}
 		return OK;
  	} 
+ 	else if (is_tagged(exp, new_sym("print"))) {
+ 		print((object_t*) cadr(exp)->integer );
+ 		return OK;
+ 	}
  	else if (is_tagged(exp, IF))  {
   		object_t* predicate = eval(cadr(exp), env);
  		object_t* consequent = caddr(exp);
@@ -206,13 +209,29 @@ tail:
  	else if (!atom(exp)) {
  		object_t* proc = eval(car(exp), env);
 		object_t* args = evlis(cdr(exp), env);
-		if (proc->type == PRIM)
-			return proc->primitive(args);
-		if (is_tagged(proc, PROCEDURE)) {
-			env = extend_env(procedure_params(proc), args, procedure_env(proc));
- 			exp = cons(BEGIN, procedure_body(proc));
- 			goto tail;
- 		}
+		
+			if (proc->type == PRIM) {
+				// printf("primitive:");
+				// print_object((cdr(exp)));
+				// print(args);
+
+				return proc->primitive(args);
+			}
+			if (is_tagged(proc, PROCEDURE)) {
+				env = extend_env(procedure_params(proc), args, procedure_env(proc));
+	 			//exp = cons(BEGIN, procedure_body(proc));
+	 			exp = procedure_body(proc);
+	 			while(!null(cdr(exp))){
+	 				printf("loop one");
+	 				print(eval(car(exp), env));
+
+	 				exp = cdr(exp);
+	 			}
+	 			printf("no loop\n");
+	 			exp = car(exp);
+	 			print(env);
+	 			goto tail;
+	 		}
 		return apply(proc, args);		
  	}
  	else {
@@ -230,7 +249,6 @@ tail:
 
 int main(int argc, char** argv) {
 	char* input;
-	object_t* env = new_cons();
 	/* Initialize static keywords */
 	LAMBDA 		= new_sym("lambda");
 	QUOTE 		= new_sym("quote");
@@ -243,14 +261,14 @@ int main(int argc, char** argv) {
 	SET 		= new_sym("set!");
 	DEFINE 		= new_sym("define");
 	/* Initialize initial environment */
-	env = extend_env(scan("(true false)"), cons(TRUE, FALSE), new_cons());
-	init_prim(env);
-	eval(scan("(define #t true)"), env);
-	eval(scan("(define #f false)"), env);
-	eval(scan("(define = eq)"), env);
-	eval(scan("(define factorial (lambda(n) (if (= n 0) 1 (* n (factorial (- n 1))))))"), env);
-	eval(scan("(define (sum-of-squares num-list) (define sos-helper (lambda (remaining sum-so-far) (if (null? remaining) sum-so-far (sos-helper (cdr remaining) (+ (* (car remaining) (car remaining)) sum-so-far))))) (sos-helper num-list 0))"), env);
-	//print(eval(scan("(factorial 5)"), env));
+	GLOBAL_ENV = extend_env(&nil, &nil, &nil);
+	init_prim(GLOBAL_ENV);
+	eval(scan("(define #t true)"), GLOBAL_ENV);
+	eval(scan("(define #f false)"), GLOBAL_ENV);
+	eval(scan("(define = eq)"), GLOBAL_ENV);
+	eval(scan("(define factorial (lambda(n) (if (< n 1) 1 (* n (factorial (- n 1))))))"), GLOBAL_ENV);
+	eval(scan("(define (sum-of-squares num-list) (define sos-helper (lambda (remaining sum-so-far) (if (null? remaining) sum-so-far (sos-helper (cdr remaining) (+ (* (car remaining) (car remaining)) sum-so-far))))) (sos-helper num-list 0))"), GLOBAL_ENV);
+	//print(eval(scan("(factorial 5)"), GLOBAL_ENV));
 	printf("LITH ITH LITHENING...\n");
 	size_t sz;
 	do {
@@ -263,7 +281,7 @@ int main(int argc, char** argv) {
 		//print(in);
 		//free(input);
 		printf("=> ");
-		print(eval(in, env));
+		print(eval(in, GLOBAL_ENV));
 	} while(input);
 	return 0;
 }

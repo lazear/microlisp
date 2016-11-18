@@ -1,6 +1,19 @@
 #include "lisp.h"
 #include <stdio.h>
 
+#define type(x, t) (__type_check(__func__, x, t))
+
+void __type_check(const char* func, object_t* obj, type_t type) {
+	if (null(obj)) {
+		fprintf(stderr, "Invalid argument to function %s: NIL", func);
+		exit(1);
+	}
+	if (obj->type != type) {
+		fprintf(stderr, "Invalid argument to function %s. Expected type %d got %d\n", func, type, obj->type);
+		exit(1);
+	}
+}
+
 void __number_of_args(const char* func, object_t* sexp, int expected) {
 	object_t** tmp;
 	int args = 0;
@@ -19,17 +32,43 @@ void __number_of_args(const char* func, object_t* sexp, int expected) {
 	}
 }
 
+object_t* add_list(object_t* list) {
+	type(car(list), INT);
+	int total = car(list)->integer;
+	list = cdr(list);
+	while (!null(list)) {
+		type(car(list), INT);
+		total += car(list)->integer;
+		list = cdr(list);
+	}
+	return new_int(total);
+}
+
+object_t* sub_list(object_t* list) {
+	type(car(list), INT);
+	int total = car(list)->integer;
+	list = cdr(list);
+	while (!null(list)) {
+		type(car(list), INT);
+		total -= car(list)->integer;
+		list = cdr(list);
+	}
+	return new_int(total);
+}
+
 object_t* __add(object_t* first, object_t* rest) {
 	if (null(rest) || null(car(rest)))
 		return first;
-	first->integer += car(rest)->integer;
+	object_t* n = new_int(first->integer);
+	n->integer += car(rest)->integer;
 	return __add(first, cdr(rest));
 }
 
 object_t* __sub(object_t* first, object_t* rest) {
 	if (null(rest) || null(car(rest)))
 		return first;
-	first->integer -= car(rest)->integer;
+	object_t* n = new_int(first->integer);
+	n->integer += car(rest)->integer;
 	return __sub(first, cdr(rest));
 }
 
@@ -121,8 +160,8 @@ object_t* init_prim(object_t* env) {
 	add_proc("cons", p_cons);
 	add_proc("car", p_car);
 	add_proc("cdr", p_cdr);
-	add_proc("+", p_add);
-	add_proc("-", p_sub);
+	add_proc("+", add_list);
+	add_proc("-", sub_list);
 	add_proc("*", p_mul);
 	add_proc("/", p_div);
 	add_proc(">", p_gt);

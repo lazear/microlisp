@@ -116,8 +116,8 @@ void print_object(object_t* obj) {
 		case CONS: {
 			if (eq(car(obj), new_sym("procedure"))) {
 				printf("<procedure> ");
-				print_object(cadr(obj));
-				print_object(caddr(obj));
+				//print_object(cadr(obj));
+				//print_object(caddr(obj));
 				return;
 			}
 			printf("(");
@@ -139,7 +139,7 @@ void print_object(object_t* obj) {
 			break;
 		} 
 		case PRIM:
-			printf("#<primitive>");
+			//printf("#<primitive>");
 			break;
 	}
 }
