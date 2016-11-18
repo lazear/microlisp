@@ -136,7 +136,7 @@ sexp_t* read(FILE* in) {
 			append();
 			for (i = 0; i < PDEPTH; i++)
 				printf("..");
-			if (stop == 1)
+			if (stop)
 				break;
 			continue;
 		} 
@@ -172,12 +172,7 @@ sexp_t* read(FILE* in) {
 				break;
 		}
 		else
-			buffer[index++] = c;
-
-		
-
-	
-			
+			buffer[index++] = c;			
 	}
 	append();
 	free(buffer);
