@@ -27,7 +27,9 @@ SOFTWARE.
 #include <stdlib.h>
 #include <stdbool.h>
 
+
 #define null(x) ((x) == NULL || (x) == NIL)
+#define EOL(x) 	(null((x)) || (x) == EMPTY_LIST)
 #define error(x) do { fprintf(stderr, "%s\n", x); exit(1); }while(0)
 #define caar(x) (car(car((x))))
 #define cadr(x) (car(cdr((x))))
@@ -37,7 +39,7 @@ SOFTWARE.
 #define cddr(x) (cdr(cdr((x))))
 #define atom(x) (!null(x) && (x)->type != LIST)
 
-typedef enum { INTEGER, SYMBOL, BOOL, LIST } type_t;
+typedef enum { INTEGER, SYMBOL, STRING, LIST } type_t;
 
 /* Lisp object. We want to mimic the homoiconicity of LISP, so we will not be
 providing separate "types" for procedures, etc. Everything is represented as
@@ -48,7 +50,6 @@ struct object {
 	union {
 		int integer;
 		char* string;
-		bool boolean;
 		struct {
 			struct object* car;
 			struct object* cdr;
@@ -62,6 +63,9 @@ static struct object* NIL;
 static struct object* EMPTY_LIST;
 static struct object* TRUE;
 static struct object* QUOTE;
+static struct object* DEFINE;
+static struct object* SET;
+static struct object* LET;
 static struct object* LAMBDA;
 static struct object* PROCEDURE;
 
@@ -114,17 +118,6 @@ struct object* cons(struct object* x, struct object* y) {
 	return ret;
 }
 
-struct object* reverse(struct object* list) {
-	struct object* rev;
-	while (!null(list)) {
-		struct object* tmp = list;
-		list = list->cdr;
-		tmp->cdr = rev;
-		rev = tmp;
-	}
-	return rev;
-}
-
 struct object* car(struct object* cell) {
 	if (null(cell) || cell->type != LIST)
 		return NIL;
@@ -137,18 +130,43 @@ struct object* cdr(struct object* cell) {
 	return cell->cdr;
 }
 
+struct object* append(struct object* l1, struct object* l2) {
+	if (null(l1))
+		return l2;
+	return cons(car(l1), append(cdr(l1), l2));
+}
+
+struct object* reverse(struct object* list, struct object* first) {
+	if (null(list))
+		return first;
+	return reverse(cdr(list), cons(car(list), first));
+
+}
+
+// struct object* reverse(struct object* list) {
+// 	struct object* rev;
+// 	while (!EOL(list)) {
+// 		struct object* tmp = list;
+// 		list = list->cdr;
+// 		tmp->cdr = rev;
+// 		rev = tmp;
+// 	}
+// 	return rev;
+// }
+
 bool is_equal(struct object* x, struct object* y) {
+
 	if (x == y)
 		return true;
+	if (null(x) || null(y))
+		return false;
 	if (x->type != y->type)
 		return false;
 	switch(x->type) {
 		case INTEGER:
 			return x->integer == y->integer;
-		case SYMBOL:
+		case SYMBOL: case STRING:
 			return !strcmp(x->string, y->string);
-		case BOOL:
-			return x->boolean == y->boolean;
 	}
 }
 
@@ -224,6 +242,8 @@ void define_variable(object_t* var, object_t* val, object_t* env) {
 Recursive descent parser 
 ==============================================================================*/
 
+char SYMBOLS[] = "~!@#$%^&*_-+\\:,.<>|{}[]";
+
 int peek(FILE* in) {
 	int c = getc(in);
 	ungetc(c, in);
@@ -240,11 +260,29 @@ void skip(FILE* in) {
 	}
 }
 
+struct object* read_string(FILE* in) {
+	char buf[256];
+    int i = 0;
+    int c;
+    while ((c = getc(in)) != '\"') {
+    	if (c == EOF)
+    		return NIL;
+        if (i >= 256)
+            error("String too long");
+        buf[i++] = (char)c;
+    }
+    buf[i] = '\0';
+    struct object* s = make_symbol(buf);
+    s->type = STRING;
+    return s;
+}
+
+
 struct object* read_symbol(FILE* in, char start) {
 	char buf[128];
 	buf[0] = start;
     int i = 1;
-    while (isalnum(peek(in))) {
+    while (isalnum(peek(in)) || strchr(SYMBOLS, peek(in))) {
         if (i >= 128)
             error("Symbol name too long");
         buf[i++] = getc(in);
@@ -266,7 +304,7 @@ struct object* read_list(FILE* in) {
 		obj = read_exp(in);
 		
 		if (obj == EMPTY_LIST)
-			return reverse(cell);
+			return reverse(cell, EMPTY_LIST);
 		cell = cons(obj, cell);
 	}
 	return EMPTY_LIST;
@@ -290,6 +328,8 @@ struct object* read_exp(FILE* in) {
 		}
 		if (c == EOF)
 			return NULL;
+		if (c == '\"')
+			return read_string(in);
 		if (c == '\'')
 			return read_quote(in);
 		if (c == '(')
@@ -312,6 +352,9 @@ void print_exp(struct object* e) {
 		return;
 	}
 	switch(e->type) {
+		case STRING:
+			printf("\"%s\"", e->string);
+			break;
 		case SYMBOL:
 			printf("%s", e->string);
 			break;
@@ -349,35 +392,53 @@ struct object* eval(struct object* exp, struct object* env) {
 tail:
 	if (null(exp) || exp == EMPTY_LIST)
 		return NIL;
-	if (exp->type == INTEGER) 
+	else if (exp->type == INTEGER || exp->type == STRING) 
 		return exp;
-	if (exp->type == SYMBOL)
+	else if (exp->type == SYMBOL)
 		return lookup_variable(exp, env);
-	if (is_tagged(exp, make_symbol("define"))) {
+	else if (is_tagged(exp, DEFINE)) {
 		if (atom(cadr(exp))) 
 			define_variable(cadr(exp), eval(caddr(exp), env), env);
 		else
 			define_variable(car(cadr(exp)), eval(make_lambda(cdr(cadr(exp)), cddr(exp)), env), env);
 		return make_symbol("ok");
 	}
-	if (is_tagged(exp, QUOTE))
+	else if (is_tagged(exp, SET)) {
+		if (atom(cadr(exp))) 
+			set_variable(cadr(exp), eval(caddr(exp), env), env);
+		else
+			set_variable(car(cadr(exp)), eval(make_lambda(cdr(cadr(exp)), cddr(exp)), env), env);
+		return make_symbol("ok");
+	}
+	else if (is_tagged(exp, LET)) {
+		//return eval(make_lambda())
+		printf("LET!\n");
+		return exp;
+	}
+	else if (is_tagged(exp, QUOTE))
 		return cadr(exp);
-	if (is_tagged(exp, LAMBDA))
+	else if (is_tagged(exp, LAMBDA))
 		return make_procedure(cadr(exp), cddr(exp), env);
-	if (is_tagged(exp, PROCEDURE)) {
+	else if (is_tagged(exp, PROCEDURE)) {
 		struct object* proc = eval(cdr(exp), env);
 		exp = caddr(exp);
 		goto tail;
 	}
 
-	return NIL;
+	return exp;
 }
 
 int main(int argc, char** argv) {
 	ENV = extend_env(NIL, NIL, NIL);
+	//EMPTY_LIST  = make_integer(0xDEADBEEF);
+	TRUE 		= make_integer(1);
 	QUOTE 		= make_symbol("quote");
 	LAMBDA 		= make_symbol("lambda");
 	PROCEDURE 	= make_symbol("procedure");
+	DEFINE 		= make_symbol("define");
+	SET 		= make_symbol("set!");
+	LET 		= make_symbol("let");
+
 	for(;;) {
 		print_exp(eval(read_exp(stdin), ENV));
 		printf("\n");
