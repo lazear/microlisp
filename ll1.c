@@ -40,7 +40,8 @@ SOFTWARE.
 #define cddr(x) (cdr(cdr((x))))
 #define atom(x) (!null(x) && (x)->type != LIST)
 
-typedef enum { INTEGER, SYMBOL, STRING, LIST } type_t;
+typedef enum { INTEGER, SYMBOL, STRING, LIST, PRIMITIVE } type_t;
+typedef struct object* (*primitive_t)(struct object*);
 
 /* Lisp object. We want to mimic the homoiconicity of LISP, so we will not be
 providing separate "types" for procedures, etc. Everything is represented as
@@ -55,6 +56,7 @@ struct object {
 			struct object* car;
 			struct object* cdr;
 		};
+		primitive_t primitive;
 	};
 };
 
@@ -68,6 +70,7 @@ static struct object* DEFINE;
 static struct object* SET;
 static struct object* LET;
 static struct object* LAMBDA;
+static struct object* BEGIN;
 static struct object* PROCEDURE;
 
 struct object* read_exp(FILE* in);
@@ -87,7 +90,9 @@ void alloc_heap(size_t sz) {
 		error("Out of memory!");
 }
 
-/*============================================================================*/
+/*============================================================================
+Constructors and etc
+==============================================================================*/
 
 struct object* make_symbol(char* s) {
 	struct object* ret = malloc(sizeof(struct object));
@@ -100,6 +105,13 @@ struct object* make_integer(int x) {
 	struct object* ret = malloc(sizeof(struct object));
 	ret->type = INTEGER;
 	ret->integer = x;
+	return ret;	
+}
+
+struct object* make_primitive(primitive_t x) {
+	struct object* ret = malloc(sizeof(struct object));
+	ret->type = PRIMITIVE;
+	ret->primitive = x;
 	return ret;	
 }
 
@@ -166,6 +178,19 @@ bool is_tagged(struct object* cell, struct object* tag) {
 		return false;
 	return is_equal(car(cell), tag);
 }
+
+struct object* prim_cons(struct object* args) {
+	return cons(car(args), cadr(args));
+}
+
+struct object* prim_car(struct object* args) {
+	return caar(args);
+}
+
+struct object* prim_cdr(struct object* args) {
+	return cdar(args);
+}
+
 
 /*==============================================================================
 Environment handling
@@ -305,14 +330,19 @@ struct object* read_quote(FILE* in) {
 	return cons(QUOTE, cons(read_exp(in), NIL));
 }
 
+int depth = 0;
 struct object* read_exp(FILE* in) {
 	int c;
 	struct object* root = NIL;
 
 	for(;;) {
 		c = getc(in);
-		if (c == '\n' || c == ' ' || c == '\t')
+		if (c == '\n' || c == ' ' || c == '\t') {
+			int i;
+			for (i = 1; i < depth; i++)
+				printf("..");
 			continue;
+		}
 		if (c == ';') {
 			skip(in);
 			continue;
@@ -323,10 +353,14 @@ struct object* read_exp(FILE* in) {
 			return read_string(in);
 		if (c == '\'')
 			return read_quote(in);
-		if (c == '(')
+		if (c == '(') {
+			depth++;
 			return read_list(in);
-		if (c == ')')
+		}
+		if (c == ')') {
+			depth--;
 			return EMPTY_LIST;
+		}
 		if (isdigit(c))
 			return make_integer(read_int(in, c - '0'));
 		if (c == '-' && isdigit(peek(in))) 
@@ -398,17 +432,17 @@ struct object* eval_sequence(struct object* exps, struct object* env) {
 struct object* eval(struct object* exp, struct object* env) {
 
 tail:
-	if (null(exp) || exp == EMPTY_LIST)
+	if (null(exp) || exp == EMPTY_LIST) {
 		return NIL;
-	else if (exp->type == INTEGER || exp->type == STRING) 
+	} else if (exp->type == INTEGER || exp->type == STRING) {
 		return exp;
-	else if (exp->type == SYMBOL)
+	} else if (exp->type == SYMBOL){
 		return lookup_variable(exp, env);
-	else if (is_tagged(exp, QUOTE))
+	} else if (is_tagged(exp, QUOTE)) {
 		return cadr(exp);
-	else if (is_tagged(exp, LAMBDA))
+	} else if (is_tagged(exp, LAMBDA)) {
 		return make_procedure(cadr(exp), cddr(exp), env);
-	else if (is_tagged(exp, DEFINE)) {
+	} else if (is_tagged(exp, DEFINE)) {
 		if (atom(cadr(exp))) 
 			define_variable(cadr(exp), eval(caddr(exp), env), env);
 		else {
@@ -416,8 +450,13 @@ tail:
 			define_variable(car(cadr(exp)), closure, env);
 		}
 		return make_symbol("ok");
-	}
-	else if (is_tagged(exp, SET)) {
+	} else if (is_tagged(exp, BEGIN)) {
+ 		object_t* args = cdr(exp);
+ 		for (; !null(cdr(args)); args = cdr(args))
+ 			eval(car(args), env);
+ 		exp = car(args);
+ 		goto tail;
+  	} else if (is_tagged(exp, SET)) {
 		if (atom(cadr(exp))) 
 			set_variable(cadr(exp), eval(caddr(exp), env), env);
 		else {
@@ -425,8 +464,8 @@ tail:
 			set_variable(car(cadr(exp)), closure, env);
 		}
 		return make_symbol("ok");
-	}
-	else if (is_tagged(exp, LET)) {
+	} else if (is_tagged(exp, LET)) {
+		/* We go with the strategy of transforming let into a lambda function*/
 		struct object** tmp;
 		struct object* vars = NIL;
 		struct object* vals = NIL;
@@ -434,36 +473,23 @@ tail:
 			vars = cons(caar(*tmp), vars);
 			vals = cons(cadar(*tmp), vals);
 		}
-		env = cons(cons(vars, vals), env);
-		//exp = make_lambda(vars, caddr(exp));
-		exp = caddr(exp);
+		exp = cons(make_lambda(vars, cddr(exp)), vals);
 		goto tail;
-	}
-	else if (is_tagged(exp, make_symbol("cons"))) 
-		return cons(eval(cadr(exp), env), eval(caddr(exp), env));
-	else if (is_tagged(exp, make_symbol("car"))) 
-		return car(eval(cadr(exp), env));
-	else if (is_tagged(exp, make_symbol("cdr"))) 
-		return cdr(eval(cadr(exp), env));
-
-
-
-	else {
+	} else {
 		/* procedure structure is as follows:
 		('procedure, (parameters), (body), (env)) */
 		struct object* proc = eval(car(exp), env);
 		struct object* args = evlis(cdr(exp), env);
-		env = extend_env(cadr(proc), args, cadddr(proc));
-		exp = caddr(proc);	/* procedure body */
-		//print_exp(exp);
-		//print_exp(proc);
-		print_exp(exp);
-		print_exp(args);
-		print_exp(env);
-		goto tail;
+		if (proc->type == PRIMITIVE) 
+			return proc->primitive(args);
+		if (is_tagged(proc, PROCEDURE)) {
+			env = extend_env(cadr(proc), args, cadddr(proc));
+			exp = cons(BEGIN, caddr(proc));	/* procedure body */
+			goto tail;
+		}		
+		error("Invalid arguments to eval()");
 	}
-
-	return exp;
+	return NIL;
 }
 
 int main(int argc, char** argv) {
@@ -475,11 +501,17 @@ int main(int argc, char** argv) {
 	DEFINE 		= make_symbol("define");
 	SET 		= make_symbol("set!");
 	LET 		= make_symbol("let");
+	BEGIN 		= make_symbol("begin");
 	define_variable(make_symbol("true"), TRUE, ENV);
 	define_variable(make_symbol("false"), NIL, ENV);
-
+	define_variable(make_symbol("cons"), make_primitive(prim_cons), ENV);
+	define_variable(make_symbol("car"), make_primitive(prim_car), ENV);
+	define_variable(make_symbol("cdr"), make_primitive(prim_cdr), ENV);	
 	for(;;) {
-		print_exp(eval(read_exp(stdin), ENV));
+		printf("user> ");
+		struct object* exp = read_exp(stdin);
+		printf("====> ");
+		print_exp(eval(exp, ENV));
 		printf("\n");
 	}
 }
