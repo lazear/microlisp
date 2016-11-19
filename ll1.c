@@ -71,6 +71,7 @@ static struct object* LAMBDA;
 static struct object* PROCEDURE;
 
 struct object* read_exp(FILE* in);
+struct object* eval(struct object* exp, struct object* env);
 struct object* cons(struct object* x, struct object* y);
 
 /*==============================================================================
@@ -381,6 +382,18 @@ void print_exp(struct object* e) {
 LISP evaluator 
 ==============================================================================*/
 
+struct object* evlis(struct object* exp, struct object* env) {
+	if ( null(exp))
+		return NIL;
+	return cons(eval(car(exp), env), evlis(cdr(exp), env));
+}
+
+struct object* eval_sequence(struct object* exps, struct object* env) {
+	if (null(cdr(exps))) 
+		return eval(car(exps), env);
+	eval(car(exps), env);
+	return eval_sequence(cdr(exps), env);
+}
 
 struct object* eval(struct object* exp, struct object* env) {
 
@@ -391,6 +404,10 @@ tail:
 		return exp;
 	else if (exp->type == SYMBOL)
 		return lookup_variable(exp, env);
+	else if (is_tagged(exp, QUOTE))
+		return cadr(exp);
+	else if (is_tagged(exp, LAMBDA))
+		return make_procedure(cadr(exp), cddr(exp), env);
 	else if (is_tagged(exp, DEFINE)) {
 		if (atom(cadr(exp))) 
 			define_variable(cadr(exp), eval(caddr(exp), env), env);
@@ -422,19 +439,27 @@ tail:
 		exp = caddr(exp);
 		goto tail;
 	}
-	else if (is_tagged(exp, make_symbol("cons"))) {
+	else if (is_tagged(exp, make_symbol("cons"))) 
 		return cons(eval(cadr(exp), env), eval(caddr(exp), env));
-	}
-	else if (is_tagged(exp, QUOTE))
-		return cadr(exp);
-	else if (is_tagged(exp, LAMBDA))
-		return make_procedure(cadr(exp), cddr(exp), env);
+	else if (is_tagged(exp, make_symbol("car"))) 
+		return car(eval(cadr(exp), env));
+	else if (is_tagged(exp, make_symbol("cdr"))) 
+		return cdr(eval(cadr(exp), env));
+
+
+
 	else {
+		/* procedure structure is as follows:
+		('procedure, (parameters), (body), (env)) */
 		struct object* proc = eval(car(exp), env);
-		//env = extend_env(cadddr(proc))
-		exp = caddr(proc);
-		print_exp(exp);
+		struct object* args = evlis(cdr(exp), env);
+		env = extend_env(cadr(proc), args, cadddr(proc));
+		exp = caddr(proc);	/* procedure body */
+		//print_exp(exp);
 		//print_exp(proc);
+		print_exp(exp);
+		print_exp(args);
+		print_exp(env);
 		goto tail;
 	}
 
