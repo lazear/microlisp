@@ -32,6 +32,7 @@ SOFTWARE.
 #define EOL(x) 	(null((x)) || (x) == EMPTY_LIST)
 #define error(x) do { fprintf(stderr, "%s\n", x); exit(1); }while(0)
 #define caar(x) (car(car((x))))
+#define cdar(x) (cdr(car((x))))
 #define cadr(x) (car(cdr((x))))
 #define caddr(x) (car(cdr(cdr((x)))))
 #define cadddr(x) (car(cdr(cdr(cdr((x))))))
@@ -142,17 +143,6 @@ struct object* reverse(struct object* list, struct object* first) {
 	return reverse(cdr(list), cons(car(list), first));
 
 }
-
-// struct object* reverse(struct object* list) {
-// 	struct object* rev;
-// 	while (!EOL(list)) {
-// 		struct object* tmp = list;
-// 		list = list->cdr;
-// 		tmp->cdr = rev;
-// 		rev = tmp;
-// 	}
-// 	return rev;
-// }
 
 bool is_equal(struct object* x, struct object* y) {
 
@@ -340,7 +330,7 @@ struct object* read_exp(FILE* in) {
 			return make_integer(read_int(in, c - '0'));
 		if (c == '-' && isdigit(peek(in))) 
 			return make_integer(-1 * read_int(in, getc(in) - '0'));
-		if (isalpha(c)) 
+		if (isalpha(c) || strchr(SYMBOLS, c)) 
 			return read_symbol(in, c);
 	}
 	return root;
@@ -387,6 +377,11 @@ void print_exp(struct object* e) {
 	}
 }
 
+/*==============================================================================
+LISP evaluator 
+==============================================================================*/
+
+
 struct object* eval(struct object* exp, struct object* env) {
 
 tail:
@@ -399,29 +394,47 @@ tail:
 	else if (is_tagged(exp, DEFINE)) {
 		if (atom(cadr(exp))) 
 			define_variable(cadr(exp), eval(caddr(exp), env), env);
-		else
-			define_variable(car(cadr(exp)), eval(make_lambda(cdr(cadr(exp)), cddr(exp)), env), env);
+		else {
+			struct object* closure = eval(make_lambda(cdr(cadr(exp)), cddr(exp)), env);
+			define_variable(car(cadr(exp)), closure, env);
+		}
 		return make_symbol("ok");
 	}
 	else if (is_tagged(exp, SET)) {
 		if (atom(cadr(exp))) 
 			set_variable(cadr(exp), eval(caddr(exp), env), env);
-		else
-			set_variable(car(cadr(exp)), eval(make_lambda(cdr(cadr(exp)), cddr(exp)), env), env);
+		else {
+			struct object* closure = eval(make_lambda(cdr(cadr(exp)), cddr(exp)), env);
+			set_variable(car(cadr(exp)), closure, env);
+		}
 		return make_symbol("ok");
 	}
 	else if (is_tagged(exp, LET)) {
-		//return eval(make_lambda())
-		printf("LET!\n");
-		return exp;
+		struct object** tmp;
+		struct object* vars = NIL;
+		struct object* vals = NIL;
+		for (tmp =&exp->cdr->car; !null(*tmp); tmp=&(*tmp)->cdr) {
+			vars = cons(caar(*tmp), vars);
+			vals = cons(cadar(*tmp), vals);
+		}
+		env = cons(cons(vars, vals), env);
+		//exp = make_lambda(vars, caddr(exp));
+		exp = caddr(exp);
+		goto tail;
+	}
+	else if (is_tagged(exp, make_symbol("cons"))) {
+		return cons(eval(cadr(exp), env), eval(caddr(exp), env));
 	}
 	else if (is_tagged(exp, QUOTE))
 		return cadr(exp);
 	else if (is_tagged(exp, LAMBDA))
 		return make_procedure(cadr(exp), cddr(exp), env);
-	else if (is_tagged(exp, PROCEDURE)) {
-		struct object* proc = eval(cdr(exp), env);
-		exp = caddr(exp);
+	else {
+		struct object* proc = eval(car(exp), env);
+		//env = extend_env(cadddr(proc))
+		exp = caddr(proc);
+		print_exp(exp);
+		//print_exp(proc);
 		goto tail;
 	}
 
@@ -430,14 +443,15 @@ tail:
 
 int main(int argc, char** argv) {
 	ENV = extend_env(NIL, NIL, NIL);
-	//EMPTY_LIST  = make_integer(0xDEADBEEF);
-	TRUE 		= make_integer(1);
+	TRUE 		= make_symbol("#t");
 	QUOTE 		= make_symbol("quote");
 	LAMBDA 		= make_symbol("lambda");
 	PROCEDURE 	= make_symbol("procedure");
 	DEFINE 		= make_symbol("define");
 	SET 		= make_symbol("set!");
 	LET 		= make_symbol("let");
+	define_variable(make_symbol("true"), TRUE, ENV);
+	define_variable(make_symbol("false"), NIL, ENV);
 
 	for(;;) {
 		print_exp(eval(read_exp(stdin), ENV));
