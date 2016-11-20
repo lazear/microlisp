@@ -212,7 +212,7 @@ tail:
  		error("Unknown eval!");
  	}
 }
-
+(define factorial (lambda(n) (if (eq n 1) 1 (* n (factorial (- n 1))))))
 int main(int argc, char** argv) {
 	char* input;
 	/* Initialize static keywords */
