@@ -422,6 +422,14 @@ struct object* prim_mul(struct object* list) {
 	}
 	return make_integer(total);
 }
+struct object* prim_gt(struct object* sexp) {
+	return (car(sexp)->integer > cadr(sexp)->integer) ? TRUE : NIL;
+}
+
+struct object* prim_lt(struct object* sexp) {
+	return (car(sexp)->integer < cadr(sexp)->integer) ? TRUE : NIL;
+}
+
 
 /*==============================================================================
 Environment handling
