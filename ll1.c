@@ -63,7 +63,7 @@ struct object* cdr(struct object*);
 struct object* car(struct object*);
 void print_exp(struct object*);
 bool is_tagged(struct object* cell, struct object* tag);
-
+struct object* lookup_variable(struct object* var, struct object* env);
 /*==============================================================================
 Hash table for saving memory
 ==============================================================================*/
@@ -141,7 +141,7 @@ struct object* alloc() {
 	FREE_SPACE -= (sizeof (struct object));
 	if (FREE_SPACE < sizeof(struct object))
 		error("OUT OF Memory");
-	printf("start: %x current %x\n", HEAP_START, HEAP);
+	//printf("start: %x current %x\n", HEAP_START, HEAP);
 	alloc_count++;
 	return ret;
 }
@@ -158,7 +158,7 @@ void dealloc(struct object* obj) {
 /* Strategy is to traverse the global environment and mark all of the objects in use.
 We then traverse the entire heap and dealloc those objects that were not marked */
 
-int marked = 0;
+int marked;
 void mark(struct object* exp);
 
 void mark_list(struct object* list) {
@@ -192,34 +192,33 @@ void mark(struct object* exp) {
 void gc_collect() {
 	int free = 0;
 	uint64_t trash_man;
-	for (trash_man = HEAP_START; trash_man < HEAP_TOP; trash_man += sizeof(struct object)){
+	for (trash_man = HEAP_START; trash_man < HEAP; trash_man += sizeof(struct object)){
 		struct object* g = (struct object*) (void*) trash_man;
 		if (g->gc && (g->gc != MARKED)) {
 			dealloc(g);
+			print_exp(g);
+			printf("\n");
 			free++;
 		}
 
 	}
+	printf("\nCurrent: %x Heap bottom: %x, Top %x, Size %lu\n", (uint64_t) HEAP, HEAP_START, HEAP_TOP, (HEAP_TOP - HEAP_START));
 	printf("Collected %d/%d (%d marked) objects", free, alloc_count, marked);
 }
 
 void gc_traverse() {
-
-	struct object* env = ENV;
-	while (!EOL(env)) {
-		struct object* frame 	= car(env);
-		struct object* vars 	= car(frame);
-		struct object* vals 	= cdr(frame);
-		while(!null(vars) && !null(vals)) {
-			mark_list(car(vars));
-			mark_list(car(vals));
-			vars = cdr(vars);
-			vals = cdr(vals);
+	marked = 0;
+	uint64_t trash_man;
+	for (trash_man = HEAP_START; trash_man < HEAP; trash_man += sizeof(struct object)){
+		struct object* g = lookup_variable((struct object*) (void*) trash_man, ENV);
+		if (!null(g)) {
+			mark(g);
+			mark((struct object*) (void*) trash_man);
 		}
-		env = cdr(env);
 	}
 	//printf("marked a total of %d/%d items\n", marked, alloc_count);
 	gc_collect();
+	print_exp(ENV);
 }
 
 
@@ -708,6 +707,10 @@ tail:
 			set_variable(car(cadr(exp)), closure, env);
 		}
 		return make_symbol("ok");
+	} else if (is_tagged(exp, make_symbol("gc"))) {
+		gc_traverse();
+		return NIL;
+
 	} else if (is_tagged(exp, LET)) {
 		/* We go with the strategy of transforming let into a lambda function*/
 		struct object** tmp;
@@ -752,6 +755,10 @@ void init_env() {
 	SET 		= make_symbol("set!");
 	LET 		= make_symbol("let");
 	BEGIN 		= make_symbol("begin");
+	define_variable(TRUE, TRUE, ENV);
+	define_variable(QUOTE, QUOTE, ENV);
+	define_variable(LAMBDA, LAMBDA, ENV);
+	define_variable(SET, SET, ENV);
 	define_variable(make_symbol("true"), TRUE, ENV);
 	define_variable(make_symbol("false"), NIL, ENV);
 	add_prim("cons", prim_cons);
