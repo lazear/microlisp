@@ -7,8 +7,6 @@ A set of minimal LISP implementations.
 and Their Computation by Machine, Part I][1]
 lisp1 defines only the primitives described in McCarthy's paper - namely quote, atom, eq, cond, cons, car, cdr, label, and lambda. There is no ability to define variables, and no scope. 
 
-2. lisp2 contains several extensions, including the scheme-style "define" keyword, which constructs lambda expressions from, i.e. '(define (next item) (cdr item))' would be translated into '(define next (lambda (item) (cdr item))', but this does not allow returning of closures. In addition, the arithmetic primitives (*, /, +, -) have been added.
-
-3. The scheme folder contains a minimal implementation of scheme. The current primitives supported are: 'cons, car, cdr, set-cdr!, set-car!, set!, let, list, list?, null?, pair? eq, if, begin, define, procedure, lambda, quote, and load (scheme file) and print'. Currently only supports integer type for numbers
+2. The scheme folder contains a minimal implementation of scheme that supports the most important primitives. Currently only supports integer type for numbers. This implementation takes the homoiconic approach outlined in SICP's metacircular evaluator, in which procedures are represented as lists tagged with 'procedure. This allows some interesting differences over other C implementations where procedures are stored as C-style data structures. 
 
 [1]: http://www-formal.stanford.edu/jmc/recursive.pdf
