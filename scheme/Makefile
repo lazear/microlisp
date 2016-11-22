@@ -4,5 +4,5 @@ EX = lisp
 all: compile
 compile:
 	$(CC) *.c -o $(EX)
-	./$(EX)
+	./$(EX) lib.scm
 
