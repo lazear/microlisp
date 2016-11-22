@@ -14,13 +14,12 @@
 (define >= (lambda (a b) (if (< a b) #f #t)))
 (define <= (lambda (a b) (if (> a b) #f #t)))
 
-(define (branch a) 
-	(cond 
-		((= a 0) (define x 10) (print x))
-		((= a 1) 'one)
-		((= a 2) 'two)
-		((= a 3) 'three)
-		(else 'other)))
+(define (max list-of-numbers)
+	(define (max-iter best remaining)
+		(cond ((null? remaining) best)
+			((> (car remaining) best) (max-iter (car remaining) (cdr remaining)))
+			(else (max-iter best (cdr remaining)))))
+		(max-iter (car list-of-numbers) (cdr list-of-numbers)))
 
 ;;; Map a function 'f' onto list 'a'
 (define map (lambda (f a)
