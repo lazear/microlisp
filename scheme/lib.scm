@@ -10,11 +10,24 @@
 (define cdddr (lambda(a) (cdr (cdr (cdr a)))))
 (define cadddr (lambda(a) (car (cdr (cdr (cdr a))))))
 
+(define != (lambda (a b) (if (= a b) #f #t)))
+(define >= (lambda (a b) (if (< a b) #f #t)))
+(define <= (lambda (a b) (if (> a b) #f #t)))
+
+(define (branch a) 
+	(cond 
+		((= a 0) (define x 10) (print x))
+		((= a 1) 'one)
+		((= a 2) 'two)
+		((= a 3) 'three)
+		(else 'other)))
+
 ;;; Map a function 'f' onto list 'a'
 (define map (lambda (f a)
 	(if (null? a) 
 		'()
 		(cons (f (car a)) (map f (cdr a))))))
+
 
 ;;; Provide the association pair of key from list
 (define (assoc key list)
@@ -24,6 +37,34 @@
 			(car list)
 			(assoc key (cdr list)))))
 
+;;; Lambda key-list with dispatch
+(define (make-key-list)
+	(let ((list '())) 
+		(define get-val (lambda (var) 
+			(assoc var list)))
+		(define add-key (lambda (var val)
+			(set! list (cons (cons var val) list))))
+		(define (dispatch m)
+			(if (eq m 'add) add-key	
+				(if (eq m 'get) get-val 
+					list)))
+		dispatch))
+
+;;; Lambda stack with dispatch
+(define (make-stack)
+	(let ((stack '()))
+		(define push (lambda (x) 
+			(set! stack (cons x stack))
+			stack))
+		(define pop (lambda (x)
+			(define q (car stack))
+			(set! stack (cdr stack))
+			q))
+		(define (dispatch m)
+			(if (eq m 'push) push
+				(if (eq m 'pop) pop 
+					stack)))
+		dispatch))
 ;;; Returns the last item in a list or pair.
 ;;; Pointer to cdr if list, Pointer to object if pair
 (define last-item-in-list (lambda (list)
@@ -40,6 +81,12 @@
 			(cons max '())
 			(cons start (range-helper (+ 1 start) max))))
 	(range-helper 0 number))
+
+;;; Returns a list from (0-number)
+(define (range-from start finish)
+	(if (= start finish)
+		finish
+		(cons start (range-from (+ 1 start) finish))))
 
 ;;; Tail recursive length
 (define (length list)
@@ -58,9 +105,7 @@
 	(append-helper list1 list2)))
 
 
-
 ;;; A couple macros
-
 ;;; Because this is LISP and we can...
 (define procedure-body (lambda (proc) (caddr proc)))
 (define procedure-args (lambda (proc) (cadr proc)))
@@ -91,7 +136,7 @@
 		(if (= a z)
 			'Done		;; Last iteration
 			(begin 
-				do
+				(do)
 				(for-loop (+ 1 a) z))))
 	(for-loop start end do)))
 
@@ -120,3 +165,5 @@
 (define new-func (construct-procedure '(a) '(cons a 10) (get-global-environment)))
 (define with-macros (construct-procedure '(x) (if-zero 'x 'ZERO) (get-global-environment)))
 (define (with) (lambda (a) b))
+
+

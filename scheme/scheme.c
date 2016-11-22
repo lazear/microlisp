@@ -10,6 +10,7 @@ Copyright Michael Lazear (c) 2016 */
 
 #define null(x) ((x) == NULL || (x) == NIL)
 #define EOL(x) 	(null((x)) || (x) == EMPTY_LIST)
+#define not_false(x) (!null((x)) && !is_equal((x), FALSE))
 #define error(x) do { fprintf(stderr, "%s\n", x); exit(1); }while(0)
 #define caar(x) (car(car((x))))
 #define cdar(x) (cdr(car((x))))
@@ -26,7 +27,8 @@ typedef struct object* (*primitive_t)(struct object*);
 
 /* Lisp object. We want to mimic the homoiconicity of LISP, so we will not be
 providing separate "types" for procedures, etc. Everything is represented as
-atoms (integers, strings, booleans) or a list of atoms */
+atoms (integers, strings, booleans) or a list of atoms, except for the
+primitive functions */
 typedef struct object object_t;
 struct object {
 	char gc;
@@ -47,6 +49,7 @@ static struct object* ENV;
 static struct object* NIL;
 static struct object* EMPTY_LIST;
 static struct object* TRUE;
+static struct object* FALSE;
 static struct object* QUOTE;
 static struct object* DEFINE;
 static struct object* SET;
@@ -87,7 +90,7 @@ static uint64_t hash(const char* s) {
 
 int ht_init(int size) {
 	if (HTABLE || !(size % 2))
-		return 0;
+		error("Hash table already initialized or even # of entries");
 	HTABLE = malloc(sizeof(struct htable) * size);
 	memset(HTABLE, 0, sizeof(struct htable) * size);
 	HTABLE_SIZE = size;
@@ -114,15 +117,15 @@ uint64_t HEAP_START;
 uint64_t HEAP_TOP;
 size_t FREE_SPACE;
 
-void alloc_heap(size_t sz) {
-	HEAP = malloc(sz);
-	if (HEAP == NULL) 
-		error("Out of memory!");
-	memset(HEAP, 0, sz);
-	FREE_SPACE = sz;
-	HEAP_START = (uint64_t) HEAP;
-	HEAP_TOP = HEAP_START+sz;
-}
+// void alloc_heap(size_t sz) {
+// 	HEAP = malloc(sz);
+// 	if (HEAP == NULL) 
+// 		error("Out of memory!");
+// 	memset(HEAP, 0, sz);
+// 	FREE_SPACE = sz;
+// 	HEAP_START = (uint64_t) HEAP;
+// 	HEAP_TOP = HEAP_START+sz;
+// }
 
 #define FREE 	0x0
 #define ALLOCATED 		0x1
@@ -148,80 +151,80 @@ struct object* alloc() {
 	return ret;
 }
 
-void dealloc(struct object* obj) {
-	if (obj->gc & MARKED)
-		error("Trying to deallocated a marked object");
-	if (!(obj->gc & ALLOCATED))
-		error("Trying to dealloc a non-allocated object...");
-	FREE_SPACE += sizeof(struct object);
-	obj->gc = FREE;
-}
+// void dealloc(struct object* obj) {
+// 	if (obj->gc & MARKED)
+// 		error("Trying to deallocated a marked object");
+// 	if (!(obj->gc & ALLOCATED))
+// 		error("Trying to dealloc a non-allocated object...");
+// 	FREE_SPACE += sizeof(struct object);
+// 	obj->gc = FREE;
+// }
 
-/* Strategy is to traverse the global environment and mark all of the objects in use.
-We then traverse the entire heap and dealloc those objects that were not marked */
+// /* Strategy is to traverse the global environment and mark all of the objects in use.
+// We then traverse the entire heap and dealloc those objects that were not marked */
 
-int marked;
-void mark(struct object* exp);
+// int marked;
+// void mark(struct object* exp);
 
-void mark_list(struct object* list) {
-	struct object* tmp = list;
-	while(!null(tmp)) {
-		mark(car(tmp));
-		tmp = cdr(tmp);
-	}
-}
+// void mark_list(struct object* list) {
+// 	struct object* tmp = list;
+// 	while(!null(tmp)) {
+// 		mark(car(tmp));
+// 		tmp = cdr(tmp);
+// 	}
+// }
 
-void mark(struct object* exp) {
-	if (null(exp))
-		return;
-	exp->gc = MARKED;
-	marked++;
-	if (exp->type == LIST) {
-		if (is_tagged(exp, PROCEDURE)) {
-			mark(cadr(exp));	/* params */
-			mark(caddr(exp)); 	/* body */
-			return;
-		}
-		mark_list(exp);
-		return;
-	}
+// void mark(struct object* exp) {
+// 	if (null(exp))
+// 		return;
+// 	exp->gc = MARKED;
+// 	marked++;
+// 	if (exp->type == LIST) {
+// 		if (is_tagged(exp, PROCEDURE)) {
+// 			mark(cadr(exp));	/* params */
+// 			mark(caddr(exp)); 	/* body */
+// 			return;
+// 		}
+// 		mark_list(exp);
+// 		return;
+// 	}
 
-	printf("\nmarking: ");
-	print_exp(exp);
-	return;
-}
+// 	printf("\nmarking: ");
+// 	print_exp(exp);
+// 	return;
+// }
 
-void gc_collect() {
-	int free = 0;
-	uint64_t trash_man;
-	for (trash_man = HEAP_START; trash_man < HEAP; trash_man += sizeof(struct object)){
-		struct object* g = (struct object*) (void*) trash_man;
-		if (g->gc && (g->gc != MARKED)) {
-			dealloc(g);
-			print_exp(g);
-			printf("\n");
-			free++;
-		}
+// void gc_collect() {
+// 	int free = 0;
+// 	uint64_t trash_man;
+// 	for (trash_man = HEAP_START; trash_man < HEAP; trash_man += sizeof(struct object)){
+// 		struct object* g = (struct object*) (void*) trash_man;
+// 		if (g->gc && (g->gc != MARKED)) {
+// 			dealloc(g);
+// 			print_exp(g);
+// 			printf("\n");
+// 			free++;
+// 		}
 
-	}
-	printf("\nCurrent: %x Heap bottom: %x, Top %x, Size %lu\n", (uint64_t) HEAP, HEAP_START, HEAP_TOP, (HEAP_TOP - HEAP_START));
-	printf("Collected %d/%d (%d marked) objects", free, alloc_count, marked);
-}
+// 	}
+// 	printf("\nCurrent: %x Heap bottom: %x, Top %x, Size %lu\n", (uint64_t) HEAP, HEAP_START, HEAP_TOP, (HEAP_TOP - HEAP_START));
+// 	printf("Collected %d/%d (%d marked) objects", free, alloc_count, marked);
+// }
 
-void gc_traverse() {
-	marked = 0;
-	uint64_t trash_man;
-	for (trash_man = HEAP_START; trash_man < HEAP; trash_man += sizeof(struct object)){
-		struct object* g = lookup_variable((struct object*) (void*) trash_man, ENV);
-		if (!null(g)) {
-			mark(g);
-			mark((struct object*) (void*) trash_man);
-		}
-	}
-	//printf("marked a total of %d/%d items\n", marked, alloc_count);
-	gc_collect();
-	print_exp(ENV);
-}
+// void gc_traverse() {
+// 	marked = 0;
+// 	uint64_t trash_man;
+// 	for (trash_man = HEAP_START; trash_man < HEAP; trash_man += sizeof(struct object)){
+// 		struct object* g = lookup_variable((struct object*) (void*) trash_man, ENV);
+// 		if (!null(g)) {
+// 			mark(g);
+// 			mark((struct object*) (void*) trash_man);
+// 		}
+// 	}
+// 	//printf("marked a total of %d/%d items\n", marked, alloc_count);
+// 	gc_collect();
+// 	print_exp(ENV);
+// }
 
 
 
@@ -330,6 +333,11 @@ bool is_tagged(struct object* cell, struct object* tag) {
 		return false;
 	return is_equal(car(cell), tag);
 }
+
+/*==============================================================================
+Primitive operations
+==============================================================================*/
+
 struct object* prim_get_env(struct object* args) {
 	return ENV;
 }
@@ -350,43 +358,43 @@ struct object* prim_car(struct object* args) {
 }
 
 struct object* prim_setcar(struct object* args) {
-	type(car(args), LIST);
+	//type(car(args), LIST);
 	(args->car->car = (cadr(args)));
-	return (car(args));
+	return NIL;
 }
 struct object* prim_setcdr(struct object* args) {
-	type(car(args), LIST);
+	//type(car(args), LIST);
 	(args->car->cdr = (cadr(args)));
-	return (car(args));
+	return NIL;
 }
 
 struct object* prim_cdr(struct object* args) {
 	return cdar(args);
 }
 struct object* prim_nullq(struct object* args) {
-	return EOL(car(args)) ? TRUE : NIL;
+	return EOL(car(args)) ? TRUE : FALSE;
 }
 
 struct object* prim_pairq(struct object* args) {
-	return (car(args)->type == LIST) ? TRUE : NIL;
+	return (car(args)->type == LIST) ? TRUE : FALSE;
 }
 
 struct object* prim_listq(struct object* args) {
 	struct object* list;
 	if (car(args)->type != LIST)
-		return NIL;
+		return FALSE;
 	for (list = car(args); !null(list); list = list->cdr)
 		if (!null(list->cdr) && (list->cdr->type != LIST))
-			return NIL;
-	return (car(args)->type == LIST && prim_pairq(args) != TRUE) ? TRUE : NIL;
+			return FALSE;
+	return (car(args)->type == LIST && prim_pairq(args) != TRUE) ? TRUE : FALSE;
 }
 
 struct object* prim_atomq(struct object* sexp) {
-	return atom(car(sexp)) ? TRUE : NIL;
+	return atom(car(sexp)) ? TRUE : FALSE;
 }
 
 struct object* prim_eq(struct object* args) {
-	return is_equal(car(args), cadr(args)) ? TRUE : NIL;
+	return is_equal(car(args), cadr(args)) ? TRUE : FALSE;
 }
 
 struct object* prim_add(struct object* list) {
@@ -444,12 +452,18 @@ struct object* prim_lt(struct object* sexp) {
 	return (car(sexp)->integer < cadr(sexp)->integer) ? TRUE : NIL;
 }
 
+struct object* prim_print(struct object* args) {
+	print_exp(car(args));
+	printf("\n");
+	return NIL;
+}
 
 /*==============================================================================
 Environment handling
 ==============================================================================*/
 
-struct object* extend_env(struct object* var, struct object* val, struct object* env) {
+struct object* extend_env(struct object* var, struct object* val, 
+	struct object* env) {
 	return cons(cons(var, val), env);
 }
 
@@ -488,7 +502,8 @@ void set_variable(struct object* var, struct object* val, struct object* env) {
 }
 
 /* define_variable binds var to val in the *current* frame */
-struct object* define_variable(struct object* var, struct object* val, struct object* env) {
+struct object* define_variable(struct object* var, struct object* val,
+	struct object* env) {
 	struct object* frame = car(env);
 	struct object* vars = car(frame);
 	struct object* vals = cdr(frame);
@@ -511,7 +526,7 @@ struct object* define_variable(struct object* var, struct object* val, struct ob
 Recursive descent parser 
 ==============================================================================*/
 
-char SYMBOLS[] = "~!@#$%^&*_-+\\:,.<>|{}[]?=";
+char SYMBOLS[] = "~!@#$%^&*_-+\\:,.<>|{}[]?=/";
 
 int peek(FILE* in) {
 	int c = getc(in);
@@ -714,13 +729,22 @@ tail:
  		goto tail;
   	} else if (is_tagged(exp, IF))  {
   		struct object* predicate = eval(cadr(exp), env);
- 		struct object* consequent = caddr(exp);
- 		struct object* alternative = cadddr(exp);
- 		if (!is_equal(predicate, NIL)) 
- 			exp = consequent;
- 		else 
- 			exp = alternative;
- 		goto tail;
+ 		exp = (not_false(predicate)) ? caddr(exp) : cadddr(exp); 
+ 		goto tail; 
+ 	} else if (is_tagged(exp, make_symbol("or")))  {
+  		struct object* predicate = eval(cadr(exp), env);
+ 		exp = (not_false(predicate)) ? caddr(exp) : cadddr(exp); 
+ 		goto tail; 
+ 	} else if (is_tagged(exp, make_symbol("cond"))) {
+ 		struct object* branch = cdr(exp);
+ 		for (; !null(branch); branch = cdr(branch)) {
+ 			if (is_tagged(car(branch), make_symbol("else")) ||
+ 				not_false(eval(caar(branch), env))) {
+ 				exp = cons(BEGIN, cdar(branch));
+ 				goto tail;
+ 			}
+ 		}
+ 		return NIL; 	
  	} else if (is_tagged(exp, SET)) {
 		if (atom(cadr(exp))) 
 			set_variable(cadr(exp), eval(caddr(exp), env), env);
@@ -729,10 +753,6 @@ tail:
 			set_variable(car(cadr(exp)), closure, env);
 		}
 		return make_symbol("ok");
-	} else if (is_tagged(exp, make_symbol("gc"))) {
-		gc_traverse();
-		return NIL;
-
 	} else if (is_tagged(exp, LET)) {
 		/* We go with the strategy of transforming let into a lambda function*/
 		struct object** tmp;
@@ -749,7 +769,6 @@ tail:
 			/* Define the named let as a lambda function */
 			define_variable(cadr(exp), eval(make_lambda(vars, cdr(cddr(exp))), extend_env(vars, vals, env)), env);
 			/* Then evaluate the lambda function with the starting values */
-
 			exp = cons(cadr(exp), vals);
 			goto tail;
 		}
@@ -774,7 +793,7 @@ tail:
 			exp = cons(BEGIN, caddr(proc));	/* procedure body */
 			goto tail;
 		}		
-		error("Invalid arguments to eval()");
+		//printf("Invalid arguments to eval()");
 	}
 	return NIL;
 }
@@ -782,24 +801,21 @@ tail:
 void init_env() {
 	#define add_prim(s, c) \
 		define_variable(make_symbol(s), make_primitive(c), ENV)
-
+	#define add_sym(s, c) \
+		do { c = make_symbol(s); define_variable(c, c, ENV); } while(0);
 	ENV = extend_env(NIL, NIL, NIL);
-	//EMPTY_LIST  = cons(NIL, NIL);
-	TRUE 		= make_symbol("#t");
-	QUOTE 		= make_symbol("quote");
-	LAMBDA 		= make_symbol("lambda");
-	PROCEDURE 	= make_symbol("procedure");
-	DEFINE 		= make_symbol("define");
-	SET 		= make_symbol("set!");
-	LET 		= make_symbol("let");
-	BEGIN 		= make_symbol("begin");
-	IF 			= make_symbol("if");
-	define_variable(TRUE, TRUE, ENV);
-	define_variable(QUOTE, QUOTE, ENV);
-	define_variable(LAMBDA, LAMBDA, ENV);
-	define_variable(SET, SET, ENV);
+	add_sym("#t", TRUE);
+	add_sym("#f", FALSE);
+	add_sym("quote", QUOTE);
+	add_sym("lambda", LAMBDA);
+	add_sym("procedure", PROCEDURE);
+	add_sym("define", DEFINE);
+	add_sym("let", LET);
+	add_sym("set!", SET);
+	add_sym("begin", BEGIN);
+	add_sym("if", IF);
 	define_variable(make_symbol("true"), TRUE, ENV);
-	define_variable(make_symbol("false"), NIL, ENV);
+	define_variable(make_symbol("false"), FALSE, ENV);
 	add_prim("cons", prim_cons);
 	add_prim("car", prim_car);
 	add_prim("set-car!", prim_setcar);
@@ -818,6 +834,7 @@ void init_env() {
 	add_prim("<", prim_lt);
 	add_prim(">", prim_gt);
 	add_prim("load", load_file);
+	add_prim("print", prim_print);
 	add_prim("get-global-environment", prim_get_env);
 	add_prim("set-global-environment", prim_set_env);
 }
@@ -839,24 +856,21 @@ struct object* load_file(struct object* args) {
 }
 
 int main(int argc, char** argv) {
-	
 	int NELEM = 8191;
-
 	ht_init(NELEM);
-	alloc_heap(sizeof(struct object) * NELEM);
-	printf("HEAP SIZE: %lu\n", FREE_SPACE);
 	init_env();
 	struct object* exp;
 	int i;
 	for (i = 1; i < argc; i++) 
 		load_file(cons(make_symbol(argv[i]), NIL));
-
-	//gc_traverse();
 	for(;;) {
 		printf("user> ");
-		exp = read_exp(stdin);
-		printf("====> ");
-		print_exp(eval(exp, ENV));
-		printf("\n");
+		exp = eval(read_exp(stdin), ENV);
+		if (!null(exp)) {
+			printf("====> ");
+			print_exp(exp);
+			printf("\n");
+		}
+		
 	}
 }
