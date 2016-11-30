@@ -14,12 +14,21 @@
 (define >= (lambda (a b) (if (< a b) #f #t)))
 (define <= (lambda (a b) (if (> a b) #f #t)))
 
+;;; Return the maximum value from a list of integers
 (define (max list-of-numbers)
 	(define (max-iter best remaining)
 		(cond ((null? remaining) best)
 			((> (car remaining) best) (max-iter (car remaining) (cdr remaining)))
 			(else (max-iter best (cdr remaining)))))
 		(max-iter (car list-of-numbers) (cdr list-of-numbers)))
+
+;;; Return the minimum value from a list of integers
+(define (min list-of-numbers)
+	(define (min-iter best remaining)
+		(cond ((null? remaining) best)
+			((< (car remaining) best) (min-iter (car remaining) (cdr remaining)))
+			(else (min-iter best (cdr remaining)))))
+		(min-iter (car list-of-numbers) (cdr list-of-numbers)))
 
 ;;; Map a function 'f' onto list 'a'
 (define map (lambda (f a)
@@ -103,6 +112,13 @@
 			(cons (car l1) (append-helper (cdr l1) l2))))
 	(append-helper list1 list2)))
 
+;;; Reverse list
+(define (reverse list)
+	(define (reverse-iter remaining first) 
+		(if (null? remaining)
+			first
+			(reverse-iter (cdr remaining) (cons (car remaining) first))))
+	(reverse-iter list '()))
 
 ;;; A couple macros
 ;;; Because this is LISP and we can...
@@ -164,5 +180,3 @@
 (define new-func (construct-procedure '(a) '(cons a 10) (get-global-environment)))
 (define with-macros (construct-procedure '(x) (if-zero 'x 'ZERO) (get-global-environment)))
 (define (with) (lambda (a) b))
-
-

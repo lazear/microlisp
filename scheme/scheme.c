@@ -20,7 +20,7 @@ Copyright Michael Lazear (c) 2016 */
 #define cadar(x) (car(cdr(car((x)))))
 #define cddr(x) (cdr(cdr((x))))
 #define atom(x) (!null(x) && (x)->type != LIST)
-#define type(x, t) (__type_check(__func__, x, t))
+#define ASSERT_TYPE(x, t) (__type_check(__func__, x, t))
 
 typedef enum { INTEGER, SYMBOL, STRING, LIST, PRIMITIVE } type_t;
 typedef struct object* (*primitive_t)(struct object*);
@@ -44,7 +44,7 @@ struct object {
 	};
 } __attribute__((packed));
 
-/* We declare a couple of global variables as keywords */
+/* We declare a couple of global variables for keywords */
 static struct object* ENV;
 static struct object* NIL;
 static struct object* EMPTY_LIST;
@@ -69,7 +69,7 @@ void print_exp(struct object*);
 bool is_tagged(struct object* cell, struct object* tag);
 struct object* lookup_variable(struct object* var, struct object* env);
 /*==============================================================================
-Hash table for saving memory
+Hash table for saving Lisp symbol objects. Conserves memory and faster compares
 ==============================================================================*/
 struct htable {
 	struct object* key;
@@ -109,134 +109,26 @@ struct object* ht_lookup(char* s) {
 
 
 /*==============================================================================
-  Memory management
+  Memory management - Currently no GC
 ==============================================================================*/
-
-void* HEAP;
-uint64_t HEAP_START;
-uint64_t HEAP_TOP;
-size_t FREE_SPACE;
-
-// void alloc_heap(size_t sz) {
-// 	HEAP = malloc(sz);
-// 	if (HEAP == NULL) 
-// 		error("Out of memory!");
-// 	memset(HEAP, 0, sz);
-// 	FREE_SPACE = sz;
-// 	HEAP_START = (uint64_t) HEAP;
-// 	HEAP_TOP = HEAP_START+sz;
-// }
-
-#define FREE 	0x0
-#define ALLOCATED 		0x1
-#define MARKED 			0x2
 int alloc_count = 0;
 
 struct object* alloc() {
 	struct object* ret = malloc(sizeof(struct object));
-	// struct object* ret = (struct object*) HEAP;
-	// HEAP = (void*) HEAP_START;
-	// while ((uint64_t) HEAP < HEAP_TOP) {
-	// 	HEAP = (void*) ((uint64_t) HEAP + sizeof(struct object));
-	// 	ret = (struct object*) HEAP;
-	// 	if (ret->gc == FREE)
-	// 		break;
-	// }
-	// ret->gc = ALLOCATED;
-	// FREE_SPACE -= (sizeof (struct object));
-	// if (FREE_SPACE < sizeof(struct object))
-	// 	error("OUT OF Memory");
-	// //printf("start: %x current %x\n", HEAP_START, HEAP);
-	// alloc_count++;
+	alloc_count++;
 	return ret;
 }
-
-// void dealloc(struct object* obj) {
-// 	if (obj->gc & MARKED)
-// 		error("Trying to deallocated a marked object");
-// 	if (!(obj->gc & ALLOCATED))
-// 		error("Trying to dealloc a non-allocated object...");
-// 	FREE_SPACE += sizeof(struct object);
-// 	obj->gc = FREE;
-// }
-
-// /* Strategy is to traverse the global environment and mark all of the objects in use.
-// We then traverse the entire heap and dealloc those objects that were not marked */
-
-// int marked;
-// void mark(struct object* exp);
-
-// void mark_list(struct object* list) {
-// 	struct object* tmp = list;
-// 	while(!null(tmp)) {
-// 		mark(car(tmp));
-// 		tmp = cdr(tmp);
-// 	}
-// }
-
-// void mark(struct object* exp) {
-// 	if (null(exp))
-// 		return;
-// 	exp->gc = MARKED;
-// 	marked++;
-// 	if (exp->type == LIST) {
-// 		if (is_tagged(exp, PROCEDURE)) {
-// 			mark(cadr(exp));	/* params */
-// 			mark(caddr(exp)); 	/* body */
-// 			return;
-// 		}
-// 		mark_list(exp);
-// 		return;
-// 	}
-
-// 	printf("\nmarking: ");
-// 	print_exp(exp);
-// 	return;
-// }
-
-// void gc_collect() {
-// 	int free = 0;
-// 	uint64_t trash_man;
-// 	for (trash_man = HEAP_START; trash_man < HEAP; trash_man += sizeof(struct object)){
-// 		struct object* g = (struct object*) (void*) trash_man;
-// 		if (g->gc && (g->gc != MARKED)) {
-// 			dealloc(g);
-// 			print_exp(g);
-// 			printf("\n");
-// 			free++;
-// 		}
-
-// 	}
-// 	printf("\nCurrent: %x Heap bottom: %x, Top %x, Size %lu\n", (uint64_t) HEAP, HEAP_START, HEAP_TOP, (HEAP_TOP - HEAP_START));
-// 	printf("Collected %d/%d (%d marked) objects", free, alloc_count, marked);
-// }
-
-// void gc_traverse() {
-// 	marked = 0;
-// 	uint64_t trash_man;
-// 	for (trash_man = HEAP_START; trash_man < HEAP; trash_man += sizeof(struct object)){
-// 		struct object* g = lookup_variable((struct object*) (void*) trash_man, ENV);
-// 		if (!null(g)) {
-// 			mark(g);
-// 			mark((struct object*) (void*) trash_man);
-// 		}
-// 	}
-// 	//printf("marked a total of %d/%d items\n", marked, alloc_count);
-// 	gc_collect();
-// 	print_exp(ENV);
-// }
-
-
 
 /*============================================================================
 Constructors and etc
 ==============================================================================*/
 int __type_check(const char* func, object_t* obj, type_t type) {
 	if (null(obj)) {
-		fprintf(stderr, "Invalid argument to function %s: NIL", func);
+		fprintf(stderr, "Invalid argument to function %s: NIL\n", func);
 		exit(1);
 	} else if (obj->type != type) {
-		fprintf(stderr, "Invalid argument to function %s. Expected type %d got %d\n", func, type, obj->type);
+		char* types[5] = {"INTEGER", "SYMBOL", "STRING", "LIST", "PRIMITIVE"};
+		fprintf(stderr, "Invalid argument to function %s. Expected %s got %s\n", func, types[type], types[obj->type]);
 		exit(1);
 	}
 	return 1;
@@ -358,12 +250,12 @@ struct object* prim_car(struct object* args) {
 }
 
 struct object* prim_setcar(struct object* args) {
-	//type(car(args), LIST);
+	ASSERT_TYPE(car(args), LIST);
 	(args->car->car = (cadr(args)));
 	return NIL;
 }
 struct object* prim_setcdr(struct object* args) {
-	//type(car(args), LIST);
+	ASSERT_TYPE(car(args), LIST);
 	(args->car->cdr = (cadr(args)));
 	return NIL;
 }
@@ -398,11 +290,11 @@ struct object* prim_eq(struct object* args) {
 }
 
 struct object* prim_add(struct object* list) {
-	type(car(list), INTEGER);
+	ASSERT_TYPE(car(list), INTEGER);
 	int total = car(list)->integer;
 	list = cdr(list);
 	while (!EOL(car(list))) {
-		type(car(list), INTEGER);
+		ASSERT_TYPE(car(list), INTEGER);
 		total += car(list)->integer;
 		list = cdr(list);
 	}
@@ -410,11 +302,11 @@ struct object* prim_add(struct object* list) {
 }
 
 struct object* prim_sub(struct object* list) {
-	type(car(list), INTEGER);
+	ASSERT_TYPE(car(list), INTEGER);
 	int total = car(list)->integer;
 	list = cdr(list);
 	while (!null(list)) {
-		type(car(list), INTEGER);
+		ASSERT_TYPE(car(list), INTEGER);
 		total -= car(list)->integer;
 		list = cdr(list);
 	}
@@ -422,11 +314,11 @@ struct object* prim_sub(struct object* list) {
 }
 
 struct object* prim_div(struct object* list) {
-	type(car(list), INTEGER);
+	ASSERT_TYPE(car(list), INTEGER);
 	int total = car(list)->integer;
 	list = cdr(list);
 	while (!null(list)) {
-		type(car(list), INTEGER);
+		ASSERT_TYPE(car(list), INTEGER);
 		total /= car(list)->integer;
 		list = cdr(list);
 	}
@@ -434,11 +326,11 @@ struct object* prim_div(struct object* list) {
 }
 
 struct object* prim_mul(struct object* list) {
-	type(car(list), INTEGER);
+	ASSERT_TYPE(car(list), INTEGER);
 	int total = car(list)->integer;
 	list = cdr(list);
 	while (!null(list)) {
-		type(car(list), INTEGER);
+		ASSERT_TYPE(car(list), INTEGER);
 		total *= car(list)->integer;
 		list = cdr(list);
 	}
@@ -456,6 +348,10 @@ struct object* prim_print(struct object* args) {
 	print_exp(car(args));
 	printf("\n");
 	return NIL;
+}
+
+struct object* prim_exit(struct object* args) {
+	exit(0);
 }
 
 /*==============================================================================
@@ -552,7 +448,7 @@ struct object* read_string(FILE* in) {
     	if (c == EOF)
     		return NIL;
         if (i >= 256)
-            error("String too long");
+            error("String too long - maximum length 256 characters");
         buf[i++] = (char)c;
     }
     buf[i] = '\0';
@@ -568,7 +464,7 @@ struct object* read_symbol(FILE* in, char start) {
     int i = 1;
     while (isalnum(peek(in)) || strchr(SYMBOLS, peek(in))) {
         if (i >= 128)
-            error("Symbol name too long");
+            error("Symbol name too long - maximum length 128 characters");
         buf[i++] = getc(in);
     }
     buf[i] = '\0';
@@ -793,11 +689,12 @@ tail:
 			exp = cons(BEGIN, caddr(proc));	/* procedure body */
 			goto tail;
 		}		
-		//printf("Invalid arguments to eval()");
+		printf("Invalid arguments to eval()");
 	}
 	return NIL;
 }
 
+/* Initialize the global environment, add primitive functions and symbols */
 void init_env() {
 	#define add_prim(s, c) \
 		define_variable(make_symbol(s), make_primitive(c), ENV)
@@ -837,8 +734,10 @@ void init_env() {
 	add_prim("print", prim_print);
 	add_prim("get-global-environment", prim_get_env);
 	add_prim("set-global-environment", prim_set_env);
+	add_prim("exit", prim_exit);
 }
 
+/* Loads and evaluates a file containing lisp s-expressions */
 struct object* load_file(struct object* args) {
 	struct object* exp;
 	struct object* ret;
@@ -870,7 +769,6 @@ int main(int argc, char** argv) {
 			printf("====> ");
 			print_exp(exp);
 			printf("\n");
-		}
-		
+		}		
 	}
 }
