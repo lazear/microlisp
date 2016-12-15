@@ -7,6 +7,7 @@ Copyright Michael Lazear (c) 2016 */
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <ctype.h>
 
 #define null(x) ((x) == NULL || (x) == NIL)
 #define EOL(x) 	(null((x)) || (x) == EMPTY_LIST)
@@ -29,7 +30,7 @@ typedef struct object* (*primitive_t)(struct object*);
 providing separate "types" for procedures, etc. Everything is represented as
 atoms (integers, strings, booleans) or a list of atoms, except for the
 primitive functions */
-typedef struct object object_t;
+
 struct object {
 	char gc;
 	type_t type;
@@ -43,6 +44,7 @@ struct object {
 		primitive_t primitive;
 	};
 } __attribute__((packed));
+
 
 /* We declare a couple of global variables for keywords */
 static struct object* ENV;
@@ -122,7 +124,7 @@ struct object* alloc() {
 /*============================================================================
 Constructors and etc
 ==============================================================================*/
-int __type_check(const char* func, object_t* obj, type_t type) {
+int __type_check(const char* func, struct object* obj, type_t type) {
 	if (null(obj)) {
 		fprintf(stderr, "Invalid argument to function %s: NIL\n", func);
 		exit(1);
@@ -229,6 +231,11 @@ bool is_tagged(struct object* cell, struct object* tag) {
 /*==============================================================================
 Primitive operations
 ==============================================================================*/
+
+struct object* prim_type(struct object* args) {
+	char* types[5] = {"integer", "symbol", "string", "list", "primitive"};
+	return make_symbol(types[car(args)->type]);
+}
 
 struct object* prim_get_env(struct object* args) {
 	return ENV;
@@ -407,7 +414,7 @@ struct object* define_variable(struct object* var, struct object* val,
 	while(!null(vars)) {
 		if (is_equal(var, car(vars))) {
 			vals->car = val;
-			return;
+			return val;
 		}
 		vars = cdr(vars);
 		vals = cdr(vals);
@@ -495,8 +502,10 @@ struct object* read_quote(FILE* in) {
 }
 
 int depth = 0;
+
 struct object* read_exp(FILE* in) {
 	int c;
+
 	for(;;) {
 		c = getc(in);
 		if (c == '\n' || c== '\r' || c == ' ' || c == '\t') {
@@ -730,6 +739,7 @@ void init_env() {
 	add_prim("=", prim_eq);
 	add_prim("<", prim_lt);
 	add_prim(">", prim_gt);
+	add_prim("type", prim_type);
 	add_prim("load", load_file);
 	add_prim("print", prim_print);
 	add_prim("get-global-environment", prim_get_env);
