@@ -120,6 +120,15 @@
 			(reverse-iter (cdr remaining) (cons (car remaining) first))))
 	(reverse-iter list '()))
 
+(define (pow num exp) 
+	(define (iter a b) 
+		(if (eq b 1) 
+			a
+			(iter (* a num) (- b 1))))
+	(if (eq exp 0)
+		1
+		(iter num exp)))
+
 ;;; A couple macros
 ;;; Because this is LISP and we can...
 (define procedure-body (lambda (proc) (caddr proc)))

@@ -35,7 +35,7 @@ struct object {
 	char gc;
 	type_t type;
 	union {
-		int integer;
+		int64_t integer;
 		char* string;
 		struct {
 			struct object* car;
@@ -298,7 +298,7 @@ struct object* prim_eq(struct object* args) {
 
 struct object* prim_add(struct object* list) {
 	ASSERT_TYPE(car(list), INTEGER);
-	int total = car(list)->integer;
+	int64_t total = car(list)->integer;
 	list = cdr(list);
 	while (!EOL(car(list))) {
 		ASSERT_TYPE(car(list), INTEGER);
@@ -310,7 +310,7 @@ struct object* prim_add(struct object* list) {
 
 struct object* prim_sub(struct object* list) {
 	ASSERT_TYPE(car(list), INTEGER);
-	int total = car(list)->integer;
+	int64_t total = car(list)->integer;
 	list = cdr(list);
 	while (!null(list)) {
 		ASSERT_TYPE(car(list), INTEGER);
@@ -322,7 +322,7 @@ struct object* prim_sub(struct object* list) {
 
 struct object* prim_div(struct object* list) {
 	ASSERT_TYPE(car(list), INTEGER);
-	int total = car(list)->integer;
+	int64_t total = car(list)->integer;
 	list = cdr(list);
 	while (!null(list)) {
 		ASSERT_TYPE(car(list), INTEGER);
@@ -334,7 +334,7 @@ struct object* prim_div(struct object* list) {
 
 struct object* prim_mul(struct object* list) {
 	ASSERT_TYPE(car(list), INTEGER);
-	int total = car(list)->integer;
+	int64_t total = car(list)->integer;
 	list = cdr(list);
 	while (!null(list)) {
 		ASSERT_TYPE(car(list), INTEGER);
@@ -557,7 +557,7 @@ void print_exp(struct object* e) {
 			printf("%s", e->string);
 			break;
 		case INTEGER:
-			printf("%d", e->integer);
+			printf("%ld", e->integer);
 			break;
 		case PRIMITIVE:
 			printf("<function>");
@@ -772,6 +772,7 @@ int main(int argc, char** argv) {
 	int i;
 	for (i = 1; i < argc; i++) 
 		load_file(cons(make_symbol(argv[i]), NIL));
+
 	for(;;) {
 		printf("user> ");
 		exp = eval(read_exp(stdin), ENV);
