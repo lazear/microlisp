@@ -129,6 +129,22 @@
 		1
 		(iter num exp)))
 
+(define (>= a b)
+  (if (< a b) #f #t))
+
+(define (<= a b) 
+  (if (> a b) #f #t))
+
+(define ge <=)
+(define le >=)
+
+(define (mod a b)
+  (define (iter rem div)
+    (if (< rem div)
+      rem
+      (iter (- rem div) div)))
+  (iter a b))
+
 ;;; A couple macros
 ;;; Because this is LISP and we can...
 (define procedure-body (lambda (proc) (caddr proc)))
