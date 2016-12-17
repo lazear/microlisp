@@ -275,7 +275,9 @@ struct object* prim_nullq(struct object* args) {
 }
 
 struct object* prim_pairq(struct object* args) {
-	return (car(args)->type == LIST) ? TRUE : FALSE;
+	if (car(args)->type != LIST)
+		return FALSE;
+	return (atom(caar(args)) && atom(cdar(args)))  ? TRUE : FALSE;
 }
 
 struct object* prim_listq(struct object* args) {
@@ -731,6 +733,7 @@ void init_env() {
 	add_prim("list?", prim_listq);
 	add_prim("null?", prim_nullq);
 	add_prim("pair?", prim_pairq);
+	add_prim("atom?", prim_atomq);
 	add_prim("+", prim_add);
 	add_prim("-", prim_sub);
 	add_prim("*", prim_mul);
