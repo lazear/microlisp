@@ -41,7 +41,7 @@
 (define (assoc key list)
 	(if (null? list)
 		'()
-		(if (eq key (car (car list))) 
+		(if (eq? key (car (car list))) 
 			(car list)
 			(assoc key (cdr list)))))
 
@@ -53,8 +53,8 @@
 		(define add-key (lambda (var val)
 			(set! list (cons (cons var val) list))))
 		(define (dispatch m)
-			(if (eq m 'add) add-key	
-				(if (eq m 'get) get-val 
+			(if (eq? m 'add) add-key	
+				(if (eq? m 'get) get-val 
 					list)))
 		dispatch))
 
@@ -69,8 +69,8 @@
 			(set! stack (cdr stack))
 			q))
 		(define (dispatch m)
-			(if (eq m 'push) push
-				(if (eq m 'pop) pop 
+			(if (eq? m 'push) push
+				(if (eq? m 'pop) pop 
 					stack)))
 		dispatch))
 ;;; Returns the last item in a list or pair.
@@ -122,10 +122,10 @@
 
 (define (pow num exp) 
 	(define (iter a b) 
-		(if (eq b 1) 
+		(if (eq? b 1) 
 			a
 			(iter (* a num) (- b 1))))
-	(if (eq exp 0)
+	(if (eq? exp 0)
 		1
 		(iter num exp)))
 
@@ -204,4 +204,4 @@
 ;;; Construct a procedure with macro
 (define new-func (construct-procedure '(a) '(cons a 10) (get-global-environment)))
 (define with-macros (construct-procedure '(x) (if-zero 'x 'ZERO) (get-global-environment)))
-(define (with) (lambda (a) b))
+

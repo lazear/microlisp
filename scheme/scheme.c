@@ -20,6 +20,7 @@ Copyright Michael Lazear (c) 2016 */
 #define cadddr(x) (car(cdr(cdr(cdr((x))))))
 #define cadar(x) (car(cdr(car((x)))))
 #define cddr(x) (cdr(cdr((x))))
+#define cdadr(x) (cdr(car(cdr((x)))))
 #define atom(x) (!null(x) && (x)->type != LIST)
 #define ASSERT_TYPE(x, t) (__type_check(__func__, x, t))
 
@@ -294,8 +295,35 @@ struct object* prim_atomq(struct object* sexp) {
 	return atom(car(sexp)) ? TRUE : FALSE;
 }
 
+/* = primitive, only valid for numbers */
+struct object* prim_neq(struct object* args) {
+	if ((car(args)->type != INTEGER) || (cadr(args)->type != INTEGER))
+		return FALSE;
+	return (car(args)->integer == cadr(args)->integer) ? TRUE : FALSE;
+}
+
+/* eq? primitive, checks memory location, or if equal values for primitives */
 struct object* prim_eq(struct object* args) {
 	return is_equal(car(args), cadr(args)) ? TRUE : FALSE;
+}
+
+struct object* prim_equal(struct object* args) 
+{
+	if (is_equal(car(args), cadr(args)))
+		return TRUE;
+	if ((car(args)->type == LIST) && (cadr(args)->type == LIST)) {
+		struct object* a, *b;
+		a = car(args);
+		b = cadr(args);
+		while(!null(a) && !null(b)) {
+			if (!is_equal(car(a), car(b)))
+				return FALSE;
+			a = cdr(a);
+			b = cdr(b);
+		}
+		return TRUE;
+	}
+	return FALSE;
 }
 
 struct object* prim_add(struct object* list) {
@@ -738,8 +766,9 @@ void init_env() {
 	add_prim("-", prim_sub);
 	add_prim("*", prim_mul);
 	add_prim("/", prim_div);
-	add_prim("eq", prim_eq);
-	add_prim("=", prim_eq);
+	add_prim("eq?", prim_eq);
+	add_prim("equal?", prim_equal);
+	add_prim("=", prim_neq);
 	add_prim("<", prim_lt);
 	add_prim(">", prim_gt);
 	add_prim("type", prim_type);
