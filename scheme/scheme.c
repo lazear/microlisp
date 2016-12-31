@@ -8,6 +8,9 @@ Copyright Michael Lazear (c) 2016 */
 #include <stdint.h>
 #include <stdbool.h>
 #include <ctype.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <errno.h>
 
 #define null(x) ((x) == NULL || (x) == NIL)
 #define EOL(x) 	(null((x)) || (x) == EMPTY_LIST)
@@ -229,9 +232,16 @@ bool is_tagged(struct object* cell, struct object* tag) {
 	return is_equal(car(cell), tag);
 }
 
+int length(struct object* exp)
+{
+	if (null(exp))
+		return 0;
+	return 1 + length(cdr(exp));
+}
 /*==============================================================================
 Primitive operations
 ==============================================================================*/
+
 
 struct object* prim_type(struct object* args) {
 	char* types[5] = {"integer", "symbol", "string", "list", "primitive"};
@@ -733,6 +743,34 @@ tail:
 	return NIL;
 }
 
+extern char** environ;
+struct object* prim_exec(struct object* args)
+{
+	ASSERT_TYPE(car(args), STRING);
+	int l = length(args);
+	struct object* tmp = args;
+
+	char** newarg = malloc(sizeof(char*) * (l + 1));
+	char** n = newarg;
+	for (l; l; l--) {
+		ASSERT_TYPE(car(tmp), STRING);
+		*n++ = car(tmp)->string;
+		tmp = cdr(tmp);
+	}
+	*n = NULL;
+	int pid = fork();
+	if (pid == 0) {
+		/* if execve returns -1, there was an errorm so we need to kill*/
+		if(execve(car(args)->string, newarg, environ)) {
+			perror(car(args)->string);
+			kill(getpid(), SIGTERM);
+		}
+	}
+	wait(&pid);
+	return NIL;
+}
+
+
 /* Initialize the global environment, add primitive functions and symbols */
 void init_env() {
 	#define add_prim(s, c) \
@@ -777,7 +815,10 @@ void init_env() {
 	add_prim("get-global-environment", prim_get_env);
 	add_prim("set-global-environment", prim_set_env);
 	add_prim("exit", prim_exit);
+	add_prim("exec", prim_exec);
 }
+
+
 
 /* Loads and evaluates a file containing lisp s-expressions */
 struct object* load_file(struct object* args) {
@@ -802,6 +843,8 @@ int main(int argc, char** argv) {
 	init_env();
 	struct object* exp;
 	int i;
+	
+	printf("uscheme intrepreter - michael lazear (c) 2016-2017\n");
 	for (i = 1; i < argc; i++) 
 		load_file(cons(make_symbol(argv[i]), NIL));
 
