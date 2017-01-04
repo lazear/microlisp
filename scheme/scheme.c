@@ -204,7 +204,6 @@ struct object* reverse(struct object* list, struct object* first) {
 	if (null(list))
 		return first;
 	return reverse(cdr(list), cons(car(list), first));
-
 }
 
 bool is_equal(struct object* x, struct object* y) {
@@ -233,7 +232,6 @@ bool not_false(struct object *x) {
 		return false;
 	return true;
 }
-
 
 bool is_tagged(struct object* cell, struct object* tag) {
 	if (null(cell) || cell->type != LIST)
@@ -273,7 +271,17 @@ struct object* prim_cons(struct object* args) {
 }
 
 struct object* prim_car(struct object* args) {
+	#ifdef STRICT
+	ASSERT_TYPE(car(args), LIST);
+	#endif
 	return caar(args);
+}
+
+struct object* prim_cdr(struct object* args) {
+	#ifdef STRICT
+	ASSERT_TYPE(car(args), LIST);
+	#endif
+	return cdar(args);
 }
 
 struct object* prim_setcar(struct object* args) {
@@ -287,9 +295,6 @@ struct object* prim_setcdr(struct object* args) {
 	return NIL;
 }
 
-struct object* prim_cdr(struct object* args) {
-	return cdar(args);
-}
 struct object* prim_nullq(struct object* args) {
 	return EOL(car(args)) ? TRUE : FALSE;
 }
@@ -393,10 +398,14 @@ struct object* prim_mul(struct object* list) {
 	return make_integer(total);
 }
 struct object* prim_gt(struct object* sexp) {
+	ASSERT_TYPE(car(sexp), INTEGER);
+	ASSERT_TYPE(cadr(sexp), INTEGER);
 	return (car(sexp)->integer > cadr(sexp)->integer) ? TRUE : NIL;
 }
 
 struct object* prim_lt(struct object* sexp) {
+	ASSERT_TYPE(car(sexp), INTEGER);
+	ASSERT_TYPE(cadr(sexp), INTEGER);
 	return (car(sexp)->integer < cadr(sexp)->integer) ? TRUE : NIL;
 }
 
@@ -817,7 +826,7 @@ void init_env() {
 	add_sym("set!", SET);
 	add_sym("begin", BEGIN);
 	add_sym("if", IF);
-	
+
 	add_prim("cons", prim_cons);
 	add_prim("car", prim_car);
 	add_prim("cdr", prim_cdr);
@@ -882,10 +891,9 @@ int main(int argc, char** argv) {
 	for(;;) {
 		printf("user> ");
 		exp = eval(read_exp(stdin), ENV);
-	//	if (!null(exp)) {
-			printf("====> ");
-			print_exp(NULL, exp);
+		if (!null(exp)) {
+			print_exp("====>", exp);
 			printf("\n");
-	//	}		
+		}		
 	}
 }
