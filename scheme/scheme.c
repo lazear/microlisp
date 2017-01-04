@@ -14,7 +14,6 @@ Copyright Michael Lazear (c) 2016 */
 
 #define null(x) ((x) == NULL || (x) == NIL)
 #define EOL(x) 	(null((x)) || (x) == EMPTY_LIST)
-#define not_false(x) (!null((x)) && !is_equal((x), FALSE))
 #define error(x) do { fprintf(stderr, "%s\n", x); exit(1); }while(0)
 #define caar(x) (car(car((x))))
 #define cdar(x) (cdr(car((x))))
@@ -65,15 +64,16 @@ static struct object* LAMBDA;
 static struct object* BEGIN;
 static struct object* PROCEDURE;
 
+void print_exp(char*, struct object*);
+bool is_tagged(struct object* cell, struct object* tag);
 struct object* read_exp(FILE* in);
 struct object* eval(struct object* exp, struct object* env);
 struct object* cons(struct object* x, struct object* y);
 struct object* load_file(struct object* args);
 struct object* cdr(struct object*);
 struct object* car(struct object*);
-void print_exp(char*, struct object*);
-bool is_tagged(struct object* cell, struct object* tag);
 struct object* lookup_variable(struct object* var, struct object* env);
+
 /*==============================================================================
 Hash table for saving Lisp symbol objects. Conserves memory and faster compares
 ==============================================================================*/
@@ -225,6 +225,15 @@ bool is_equal(struct object* x, struct object* y) {
 	}
 	return false;
 }
+
+bool not_false(struct object *x) {
+	if (null(x) || is_equal(x, FALSE))
+		return false;
+	if (x->type == INTEGER && x->integer == 0)
+		return false;
+	return true;
+}
+
 
 bool is_tagged(struct object* cell, struct object* tag) {
 	if (null(cell) || cell->type != LIST)
@@ -399,6 +408,10 @@ struct object* prim_print(struct object* args) {
 
 struct object* prim_exit(struct object* args) {
 	exit(0);
+}
+
+struct object* prim_read(struct object* args) {
+	return read_exp(stdin);
 }
 
 /*==============================================================================
@@ -792,6 +805,8 @@ void init_env() {
 	#define add_sym(s, c) \
 		do { c = make_symbol(s); define_variable(c, c, ENV); } while(0);
 	ENV = extend_env(NIL, NIL, NIL);
+	define_variable(make_symbol("true"), TRUE, ENV);
+	define_variable(make_symbol("false"), FALSE, ENV);
 	add_sym("#t", TRUE);
 	add_sym("#f", FALSE);
 	add_sym("quote", QUOTE);
@@ -802,27 +817,28 @@ void init_env() {
 	add_sym("set!", SET);
 	add_sym("begin", BEGIN);
 	add_sym("if", IF);
-	define_variable(make_symbol("true"), TRUE, ENV);
-	define_variable(make_symbol("false"), FALSE, ENV);
+	
 	add_prim("cons", prim_cons);
 	add_prim("car", prim_car);
+	add_prim("cdr", prim_cdr);
 	add_prim("set-car!", prim_setcar);
 	add_prim("set-cdr!", prim_setcdr);
-	add_prim("cdr", prim_cdr);
 	add_prim("list", prim_list);
 	add_prim("list?", prim_listq);
 	add_prim("null?", prim_nullq);
 	add_prim("pair?", prim_pairq);
 	add_prim("atom?", prim_atomq);
+	add_prim("eq?", prim_eq);
+	add_prim("equal?", prim_equal);
+
 	add_prim("+", prim_add);
 	add_prim("-", prim_sub);
 	add_prim("*", prim_mul);
 	add_prim("/", prim_div);
-	add_prim("eq?", prim_eq);
-	add_prim("equal?", prim_equal);
 	add_prim("=", prim_neq);
 	add_prim("<", prim_lt);
 	add_prim(">", prim_gt);
+
 	add_prim("type", prim_type);
 	add_prim("load", load_file);
 	add_prim("print", prim_print);
@@ -830,6 +846,7 @@ void init_env() {
 	add_prim("set-global-environment", prim_set_env);
 	add_prim("exit", prim_exit);
 	add_prim("exec", prim_exec);
+	add_prim("read", prim_read);
 }
 
 
