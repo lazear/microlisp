@@ -26,7 +26,7 @@ Copyright Michael Lazear (c) 2016 */
 #define atom(x) (!null(x) && (x)->type != LIST)
 #define ASSERT_TYPE(x, t) (__type_check(__func__, x, t))
 
-typedef enum { INTEGER, SYMBOL, STRING, LIST, PRIMITIVE } type_t;
+typedef enum { INTEGER, SYMBOL, STRING, LIST, PRIMITIVE, VECTOR } type_t;
 typedef struct object* (*primitive_t)(struct object*);
 
 /* Lisp object. We want to mimic the homoiconicity of LISP, so we will not be
@@ -40,6 +40,10 @@ struct object {
 	union {
 		int64_t integer;
 		char* string;
+		struct {
+			struct object** vector;
+			int vsize;
+		};
 		struct {
 			struct object* car;
 			struct object* cdr;
@@ -133,11 +137,22 @@ int __type_check(const char* func, struct object* obj, type_t type) {
 		fprintf(stderr, "Invalid argument to function %s: NIL\n", func);
 		exit(1);
 	} else if (obj->type != type) {
-		char* types[5] = {"INTEGER", "SYMBOL", "STRING", "LIST", "PRIMITIVE"};
+		char* types[6] = {"INTEGER", "SYMBOL", "STRING", "LIST", "PRIMITIVE", "VECTOR"};
 		fprintf(stderr, "Invalid argument to function %s. Expected %s got %s\n", func, types[type], types[obj->type]);
 		exit(1);
 	}
 	return 1;
+}
+
+struct object* make_vector(int size) {
+	struct object* ret = alloc();
+	ret->type = VECTOR;
+	ret->vector = malloc(sizeof(struct object*) * size);
+	ret->vsize = size;
+	
+	memset(ret->vector, NIL, size);
+
+	return ret;
 }
 
 struct object* make_symbol(char* s) {
@@ -251,7 +266,7 @@ Primitive operations
 
 
 struct object* prim_type(struct object* args) {
-	char* types[5] = {"integer", "symbol", "string", "list", "primitive"};
+	char* types[6] = {"integer", "symbol", "string", "list", "primitive", "vector"};
 	return make_symbol(types[car(args)->type]);
 }
 
@@ -421,6 +436,30 @@ struct object* prim_exit(struct object* args) {
 
 struct object* prim_read(struct object* args) {
 	return read_exp(stdin);
+}
+
+struct object* prim_vget(struct object* args) {
+	ASSERT_TYPE(car(args), VECTOR);
+	ASSERT_TYPE(cadr(args), INTEGER);
+	if (cadr(args)->integer >= car(args)->vsize)
+		return NIL;
+	return car(args)->vector[cadr(args)->integer];
+}
+
+struct object* prim_vset(struct object* args) {
+	ASSERT_TYPE(car(args), VECTOR);
+	ASSERT_TYPE(cadr(args), INTEGER);
+	if (null(caddr(args)))
+		return NIL;
+	if (cadr(args)->integer >= car(args)->vsize)
+		return NIL;
+	car(args)->vector[cadr(args)->integer] = caddr(args);
+	return make_symbol("ok");
+}
+
+struct object* prim_vec(struct object* args) {
+	ASSERT_TYPE(car(args), INTEGER);
+	return make_vector(car(args)->integer);
 }
 
 /*==============================================================================
@@ -626,6 +665,9 @@ void print_exp(char* str, struct object* e) {
 		case PRIMITIVE:
 			printf("<function>");
 			break; 
+		case VECTOR:
+			printf("<vector %d>", e->vsize);
+			break;
 		case LIST:
 			if (is_tagged(e, PROCEDURE)) {
 				printf("<closure>");
@@ -856,6 +898,10 @@ void init_env() {
 	add_prim("exit", prim_exit);
 	add_prim("exec", prim_exec);
 	add_prim("read", prim_read);
+	add_prim("vector", prim_vec);
+	add_prim("vector-get", prim_vget);
+	add_prim("vector-set", prim_vset);
+
 }
 
 
