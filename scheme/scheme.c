@@ -71,7 +71,7 @@ struct object* cons(struct object* x, struct object* y);
 struct object* load_file(struct object* args);
 struct object* cdr(struct object*);
 struct object* car(struct object*);
-void print_exp(struct object*);
+void print_exp(char*, struct object*);
 bool is_tagged(struct object* cell, struct object* tag);
 struct object* lookup_variable(struct object* var, struct object* env);
 /*==============================================================================
@@ -392,7 +392,7 @@ struct object* prim_lt(struct object* sexp) {
 }
 
 struct object* prim_print(struct object* args) {
-	print_exp(car(args));
+	print_exp(NULL, car(args));
 	printf("\n");
 	return NIL;
 }
@@ -584,7 +584,9 @@ struct object* read_exp(FILE* in) {
 	return NIL;
 }
 
-void print_exp(struct object* e) {
+void print_exp(char* str, struct object* e) {
+	if (str)
+		printf("%s ", str);
 	if (null(e)) {
 		printf("'()");
 		return;
@@ -610,15 +612,14 @@ void print_exp(struct object* e) {
 			printf("(");
 			struct object** t = &e;
 			while(!null(*t)) {
-				print_exp((*t)->car);
+				print_exp(NULL, (*t)->car);
 				if (!null((*t)->cdr)) {
 					printf(" ");
 					if ((*t)->cdr->type == LIST) {
 						t = &(*t)->cdr;						
 					}
 					else{
-						printf(". ");
-						print_exp((*t)->cdr);
+						print_exp(".", (*t)->cdr);
 						break;
 					}
 				} else
@@ -652,8 +653,15 @@ tail:
 		return NIL;
 	} else if (exp->type == INTEGER || exp->type == STRING) {
 		return exp;
-	} else if (exp->type == SYMBOL){
-		return lookup_variable(exp, env);
+	} else if (exp->type == SYMBOL) {
+		struct object* s = lookup_variable(exp, env);
+		#ifdef STRICT
+		if (null(s)) {
+			print_exp("Unbound symbol:", exp);
+			printf("\n");
+		}
+		#endif
+		return s;
 	} else if (is_tagged(exp, QUOTE)) {
 		return cadr(exp);
 	} else if (is_tagged(exp, LAMBDA)) { 
@@ -729,6 +737,11 @@ tail:
 		struct object* proc = eval(car(exp), env);
 		struct object* args = evlis(cdr(exp), env);
 		if (null(proc)) {
+			#ifdef STRICT
+			print_exp("Invalid arguments to eval:", exp);
+			printf("\n");
+			#endif
+
 			return NIL;
 		}
 		if (proc->type == PRIMITIVE) 
@@ -738,8 +751,9 @@ tail:
 			exp = cons(BEGIN, caddr(proc));	/* procedure body */
 			goto tail;
 		}		
-		printf("Invalid arguments to eval()");
 	}
+	print_exp("Invalid arguments to eval:", exp);	
+	printf("\n");
 	return NIL;
 }
 
@@ -851,10 +865,10 @@ int main(int argc, char** argv) {
 	for(;;) {
 		printf("user> ");
 		exp = eval(read_exp(stdin), ENV);
-		if (!null(exp)) {
+	//	if (!null(exp)) {
 			printf("====> ");
-			print_exp(exp);
+			print_exp(NULL, exp);
 			printf("\n");
-		}		
+	//	}		
 	}
 }
