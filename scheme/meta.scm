@@ -1,18 +1,15 @@
 (define (extend-env vars vals env) (cons (cons vars vals) env))
-(define global (extend-env '() '() '()))
-(define the-empty-environment '())
+(define global (extend-env '() '() ))
 
 ;;;(set-car! (car global) (cons '(x y) '(9 12)))
 (set! global (extend-env '(x y z) '(9 17 37) global))
 (set! global (extend-env '(t r e) '(39 414 139) global))
-
-
 (define (lookup-variable-value var env)
 	(define (env-loop env)
 		(define (scan vars vals)
 			(if (null? vars)
 				(env-loop (cdr env))
-				(if (eq var (car vars))
+				(if (eq? var (car vars))
 		 			(car vals)
 					(scan (cdr vars) (cdr vals)))))
 		(if (null? env)
@@ -39,3 +36,42 @@
   	)
     (scan (car frame)
           (cdr frame))))
+
+(define input-prompt 'mlisp> )
+(define output-prompt '=====> )
+
+(define (is-tagged-list? what tag)
+	(if (list? what)
+		(if (eq? (car what) tag) #t #f)
+		#f))
+(define (number? exp) (eq? (type exp) 'integer))
+(define (string? exp) (eq? (type exp) 'string))
+(define (symbol? exp) (eq? (type exp) 'symbol))
+(define (self-evaluating? exp)
+	(cond ((number? exp) true)
+		((string? exp) true)
+		(else false)))
+(define (eval exp env)
+	(cond
+		((self-evaluating? exp) exp)
+		((symbol? exp) (lookup-variable-value exp env))
+		((is-tagged-list? exp 'quote) (cadr exp))
+		((is-tagged-list? exp 'cons)
+			(cons (eval (cadr exp) env) (eval (caddr exp) env)))
+		((is-tagged-list? exp 'define)
+			(define-variable! (cadr exp) (eval (caddr exp) env) env))
+
+		(else (print 'invalid-input) exp)
+	))
+
+
+(define (driver-loop)
+	(print input-prompt)
+	(let ((input (read)))
+		(let ((output (eval input global )))
+			(print output-prompt)
+			(print output)))
+;	(print global)
+	(driver-loop))
+
+;(driver-loop)

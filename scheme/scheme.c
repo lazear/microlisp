@@ -814,8 +814,6 @@ void init_env() {
 	#define add_sym(s, c) \
 		do { c = make_symbol(s); define_variable(c, c, ENV); } while(0);
 	ENV = extend_env(NIL, NIL, NIL);
-	define_variable(make_symbol("true"), TRUE, ENV);
-	define_variable(make_symbol("false"), FALSE, ENV);
 	add_sym("#t", TRUE);
 	add_sym("#f", FALSE);
 	add_sym("quote", QUOTE);
@@ -826,7 +824,9 @@ void init_env() {
 	add_sym("set!", SET);
 	add_sym("begin", BEGIN);
 	add_sym("if", IF);
-
+	define_variable(make_symbol("true"), TRUE, ENV);
+	define_variable(make_symbol("false"), FALSE, ENV);
+	
 	add_prim("cons", prim_cons);
 	add_prim("car", prim_car);
 	add_prim("cdr", prim_cdr);
