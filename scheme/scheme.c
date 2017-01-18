@@ -162,7 +162,7 @@ struct object* make_symbol(char* s) {
 		ret->type = SYMBOL;
 		ret->string = strdup(s);
 		ht_insert(ret);
-	}	else 
+	} 
 	return ret;
 }
 
