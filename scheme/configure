@@ -280,7 +280,7 @@ clean() {
 # If Makefile exists, grab the existing PROJECT_VER and CFLAGS variables and use them
 if [ -f $OUTPUT ]; then
 	PROJECT_VER=$(cat $OUTPUT | grep "export VERSION" | sed -e 's/^.*=[ ]*//g')
-	CFLAGS=$(cat $OUTPUT | grep "export CFLAGS" | sed -e 's/^.*=[ ]*//g')
+	CFLAGS=$(cat $OUTPUT | grep "export CFLAGS" | sed -e 's/^export CFLAGS\s*=\s*//')
 	MANPATH=$(cat $OUTPUT | grep "export MANPATH" | sed -e 's/^.*[ ]*//g')
 else
 	PROJECT_VER="0.1.0"
