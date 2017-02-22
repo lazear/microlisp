@@ -1,0 +1,407 @@
+#!/bin/bash
+# Automatic configuration script
+# Released under the MIT License
+# Copyright (c) 2017 Michael Lazear
+
+# Project information
+SOURCE_DIR=src
+INCLUDE_DIR=include
+BUILD_DIR=build
+DOCUMENTATION=docs
+OUTPUT=Makefile
+MANPATH=""
+PROJECT=$(basename "$PWD")
+PROJECT_VER=""
+PREFIX=/usr/local/bin
+
+# Build machine and compiler information
+CC=$(which cc)
+CMACHINE=$(cc -dumpmachine)
+CVERSION=$(cc -dumpversion)
+CFLAGS=""
+ARCH=$(uname -m)
+OS=$(uname -s)
+STDC_VERSION=""
+
+# Configuration information
+CONFIG_DIR=.config
+CONFIG_HEADER=$INCLUDE_DIR/configure.h
+
+check_header() {
+	printf "Checking for $1... "
+	cat << ENDHEADER > $CONFIG_DIR/header.c 
+#include "$1"
+int main(void) {
+	return 0;
+}
+ENDHEADER
+$CC -Wall -Wextra -Werror $CONFIG_DIR/header.c 2> /dev/null
+if [ $? -eq 0 ]; then
+		echo "success"
+		name=$(echo $1 | sed 's/\.h//g')
+		echo "#define CONFIGURE_${name^^}" 1 >> $CONFIG_HEADER
+		rm ./a.out
+	else
+		echo "fail"
+		echo "#define CONFIGURE_${name^^}" 0 >> $CONFIG_HEADER
+fi
+
+}
+
+check_function() {
+	printf "Checking for function $2 in $1... "
+	cat << ENDHEADER > $CONFIG_DIR/function.c 
+#include "$1"
+int main(void) {
+	$2(${@:3});
+	return 0;
+}
+ENDHEADER
+$CC -Wall -Wextra -Werror $CONFIG_DIR/function.c 2> /dev/null
+
+if [ $? -eq 0 ]; then
+		echo "success"
+		echo "#define CONFIGURE_${2^^} 1" >> $CONFIG_HEADER
+		rm ./a.out	
+	else
+		echo "fail"
+		echo "#define CONFIGURE_${2^^} 0" >> $CONFIG_HEADER
+fi
+
+}
+
+# Determine what version of standard C library we support
+check_stdc() {
+printf "Checking which version of the C standard compiler supports... "
+cat << END_STDC > $CONFIG_DIR/version.c
+#include "stdio.h"
+int main(int argc, char** argv) {
+	printf("%ld", __STDC_VERSION__);
+	return 0;
+}
+END_STDC
+$CC $CONFIG_DIR/version.c 2> /dev/null
+if [ $? -eq 0 ]; then
+		STDC_VERSION=$(./a.out)
+		echo $STDC_VERSION
+		rm ./a.out
+	else
+		echo "__STDC_VERSION__ not defined"
+fi
+}
+
+# Create a makefile
+create_makefile() {
+cat << EOF > $OUTPUT
+#!/usr/bin/make
+# Makefile automatically generated using $0 $@ 
+# $(date +"%F")
+
+# Build machine specs
+export MACHINE  = $CMACHINE
+export ARCH     = $ARCH
+
+# C compiler information
+export CC       = $CC
+export CCVER    = $CVERSION
+export STDC_VER = $STDC_VERSION
+export CFLAGS   = $CFLAGS
+
+# Project information
+export PREFIX   = $PREFIX
+export PROJECT  = $PROJECT
+export VERSION  = $PROJECT_VER
+
+export DOCS     = $DOCUMENTATION
+export MANPATH  = $MANPATH
+EOF
+cat << 'EOF' >> $OUTPUT
+# Build information
+export SRC_DIR  = src
+export INC_DIR  = include
+export BUILD    = build
+export HEADERS  = $(wildcard $(INC_DIR)/*.h)
+export SOURCE   = $(wildcard $(SRC_DIR)/*.c)
+export OBJECTS  = $(SOURCE:.c=.o)
+export TARGET   = $(BUILD)/$(PROJECT)
+
+.PHONY: all clean dist install uninstall upgrade
+
+all: $(TARGET)
+
+clean:
+	@rm -rf $(OBJECTS)
+
+dist: $(TARGET) clean 
+	@echo "creating distribution archive $(PROJECT)-$(VERSION).tar.gz"
+	if [ -d $(DOCS) ]; then \
+		tar -czvf $(PROJECT)-$(VERSION).tar.gz configure Makefile $(DOCS) $(TARGET) $(SRC_DIR) $(IN_DIR); \
+	else \
+		tar -czvf $(PROJECT)-$(VERSION).tar.gz configure Makefile $(TARGET) $(SRC_DIR) $(INC_DIR); \
+	fi 
+install: $(TARGET)
+	@echo "installing $(PROJECT) in $(PREFIX)"
+	@cp -uv $(TARGET) $(PREFIX)/$(PROJECT)-$(VERSION)
+	@chmod 0755 $(PREFIX)/$(PROJECT)-$(VERSION)
+	@ln -sf $(PREFIX)/$(PROJECT)-$(VERSION) $(PREFIX)/$(PROJECT) 
+	if [ -f $(DOCS)/$(PROJECT).1 ]; then \
+		cp $(DOCS)/$(PROJECT).1 $(MANPATH); \
+	fi;
+
+uninstall:
+	@echo "uninstalling $(PROJECT) in $(PREFIX)"
+	if [ -f $(PREFIX)/$(PROJECT) ]; then \
+		rm -rf $(PREFIX)/$(PROJECT); \
+		rm -rf $(PREFIX)/$(PROJECT)-$(VERSION); \
+	fi
+	if [ -f $(MANPATH)/$(PROJECT).1 ]; then \
+		rm -rf $(MANPATH)/$(PROJECT).1; \
+	fi
+
+upgrade:
+	@cp -uv $(TARGET) $(PREFIX)/$(PROJECT)-$(VERSION)
+	@cp -uv $(DOCS)/$(PROJECT).1 $(MANPATH)/$(PROJECT).1
+	@ln -sf $(PREFIX)/$(PROJECT)-$(VERSION) $(PREFIX)/$(PROJECT) 
+
+%.o: %.c
+	@echo "cc $<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+$(TARGET): $(OBJECTS) $(HEADERS)
+	@echo "building $(PROJECT)"
+	@$(CC) $(CFLAGS) $(OBJECTS) -o $(TARGET)
+EOF
+}
+
+create_accessories() {
+
+if [ ! -f README.md ]; then
+cat << ENDREADME > README.md 
+# $PROJECT-$PROJECT_VER
+
+### Building
+\`\`\`
+./configure
+make
+make install
+\`\`\`
+
+### Documentation
+See $PROJECT(1)
+
+### License
+See LICENSE file
+ENDREADME
+fi
+if [ ! -f LICENSE ]; then
+cat << ENDLICENSE > LICENSE
+MIT License
+
+Copyright (c) $(date +"%Y") $(whoami)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+ENDLICENSE
+fi
+if [ ! -f .gitignore ]; then	
+cat << ENDIGNORE > .gitignore
+*.o
+*.a
+.config
+ENDIGNORE
+fi
+}
+
+manpage() {
+# don't overwrite existing man pages
+if [ -f $DOCUMENTATION/$PROJECT.1 ]; then
+	return
+fi
+	cat << ENDMAN1 > $DOCUMENTATION/$PROJECT.1
+.TH ${PROJECT^^} 1
+.SH NAME
+$PROJECT \- project description
+.SH SYNOPSIS
+.B $PROJECT
+[\fB\-\-option1\fR]
+[\fB\-\-option2\fR]
+[\fB\-\-option3\fR \fIfile\fR]
+.SH DESCRIPTION
+Longform project description
+.SH OPTIONS
+.TP 
+\fB\-short\fR, \fB\-\-option1\fR
+option1 command
+.TP 
+\fB\-\-option2\fR
+option2 command
+.TP 
+\fB\-\-option2\fR \fIfile\fR
+.I file
+does what
+.SH FILES
+.I ~/.$PROJECT.conf
+.RS 
+User configuration file. See
+.BR $PROJECT(5)
+for further details
+
+.SH AUTHOR
+$(whoami)
+.SH "SEE ALSO"
+.BR $PROJECT(5)
+ENDMAN1
+}
+
+# Clean configuration and build directories
+clean() {
+	rm -rf $CONFIG_DIR
+	rm -rf $BUILD_DIR
+}
+
+
+### Script begins here ###
+
+# If Makefile exists, grab the existing PROJECT_VER and CFLAGS variables and use them
+if [ -f $OUTPUT ]; then
+	PROJECT_VER=$(cat $OUTPUT | grep "export VERSION" | sed -e 's/^.*=[ ]*//g')
+	CFLAGS=$(cat $OUTPUT | grep "export CFLAGS" | sed -e 's/^.*=[ ]*//g')
+	MANPATH=$(cat $OUTPUT | grep "export MANPATH" | sed -e 's/^.*[ ]*//g')
+else
+	PROJECT_VER="0.1.0"
+fi
+
+TEMP=`getopt -o hp --long help,clean,prefix:,cc:,cflags: -n 'configure' -- "$@"`
+
+# Note the quotes around `$TEMP': they are essential!
+eval set -- "$TEMP"
+
+while true ; do
+	case "$1" in
+		-h|--help)
+			echo "$0"
+			echo "--help:                 display help menu
+--prefix=/path/to/dir   set the installation directory  default /usr/local/bin
+--cc=/path/to/compiler  set the C compiler              default /usr/bin/cc
+--cflags=\"-Wall -O3\"    set the C compiler flags        default -O2 -Wall -Wextra -Werror -I $INCLUDE_DIR
+--clean                 clean up the config and build directories, regenerate Makefile"
+			exit 0;;
+		--clean) 
+			clean
+			exit 0;;
+		-p|--prefix) 
+			PREFIX="$2";
+			shift 2 ;;
+		--cc) 
+			CC="$2";
+			shift 2;;
+		--cflags)
+			CFLAGS="$2";
+			shift 2;;
+		--)  
+			shift;
+			break ;;
+		*) 
+			echo "$0 error: unknown argument!" ; 
+			exit 1 ;;
+	esac
+done
+
+# Make sure we've been passed a valid executable file
+if [ ! $(which $CC) ]; then
+	echo "$0 error: C compiler not found"
+	exit 1;
+fi
+
+echo "Configuring for $PROJECT-$PROJECT_VER"
+
+# If no source directory found, go ahead and create one - with a helloworld.c
+if [ ! -d $SOURCE_DIR ]; then
+	mkdir -p $SOURCE_DIR
+	cat << HELLOWORLD > $SOURCE_DIR/$PROJECT.c
+#include <stdio.h>
+#include <stdlib.h>
+#include "configure.h"
+
+int main(void) {
+	printf("Hello world brought to you by %s\n", CONFIGURE_NAME);
+	return EXIT_SUCCESS;
+}
+HELLOWORLD
+fi
+
+# Make any directories we don't have yet
+mkdir -p $DOCUMENTATION
+mkdir -p $CONFIG_DIR
+mkdir -p $INCLUDE_DIR
+mkdir -p $BUILD_DIR
+
+# No CFLAGS parsed from the Makefile, fallback to the default
+if [[ $CFLAGS == "" ]]; then
+	CFLAGS="-O2 -Wall -Wextra -Werror -I$INCLUDE_DIR"
+fi
+
+# No project version parsed from the Makefile, fallback to default
+if [[ $PROJECT_VER == "" ]]; then
+	PROJECT_VER="0.1.0"
+fi
+
+# If we haven't parsed a manpath from the Makefile, figure out what it should be
+if [[ $MANPATH == "" ]]; then
+	for path in $(manpath | tr ":" "\n"); do
+		if [ -d $path/man1 ]; then
+			MANPATH="$path/man1"
+			echo "Setting man page path to $MANPATH"
+			break;
+		fi
+	done
+fi
+
+# Does a file in the install directory already exist?
+if [ -f $PREFIX/$PROJECT ]; then
+	echo "Warning: $PREFIX/$PROJECT already exists - suggest changing project name before install"
+fi
+
+# If we haven't made a local copy of the configure script, do so now
+if [ ! -f configure ]; then
+	echo "Copying configure script to $(pwd)"
+	cp $0 configure
+fi
+
+# Begin dependency/header check 
+cat << ECONFIG > $CONFIG_HEADER
+/* This file was automatically generated by $0 */
+#ifndef _CONFIGURE_H_
+#define _CONFIGURE_H_
+
+#define CONFIGURE_NAME      "$PROJECT"
+#define CONFIGURE_VERSION   "$PROJECT_VER"
+#define CONFIGURE_ARCH      "$ARCH"
+ECONFIG
+
+check_stdc
+create_makefile
+create_accessories
+manpage
+
+check_header "stdio.h"
+check_header "stddef.h"
+check_header "stdint.h"
+check_header "stdlib.h"
+
+printf "\n#endif" >> $CONFIG_HEADER

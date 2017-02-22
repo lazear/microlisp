@@ -150,7 +150,7 @@ struct object* make_vector(int size) {
 	ret->vector = malloc(sizeof(struct object*) * size);
 	ret->vsize = size;
 	
-	memset(ret->vector, NIL, size);
+	memset(ret->vector, 0, size);
 
 	return ret;
 }
