@@ -1,6 +1,6 @@
 language: c
 
-script: ./build-ci.sh
+script: cd scheme && make && build/scheme src/fib.scm
 
 notifications:
   email: false
