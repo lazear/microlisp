@@ -1,0 +1,6 @@
+language: c
+
+script: ./build-ci.sh
+
+notifications:
+  email: false
