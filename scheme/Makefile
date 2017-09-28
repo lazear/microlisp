@@ -10,7 +10,7 @@ export ARCH     = x86_64
 export CC       = /usr/bin/cc
 export CCVER    = 6.3.1
 export STDC_VER = 201112
-export CFLAGS   = -O3 -fno-strict-aliasing -march=native -Iinclude
+export CFLAGS   = -O3 -fno-strict-aliasing -Wall -Wextra -march=native -Iinclude
 
 # Project information
 export PREFIX   = /usr/local/bin
