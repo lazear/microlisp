@@ -11,3 +11,9 @@
 
 * Compilation: Typically, try to compile using the provided Makefile settings/CFLAGS. The goal is to compile most projects with `-Wall -Wextra -Werror`, although exceptions are allowed.
 * Formatting: 4 spaces to a tab. If a .clang-format file is provided, please format code using clang-format before submitting a PR
+
+### For Rust Projects
+
+* Compilation: Code should compile without warnings or errors. 
+* Testing: Code should have tests, where applicable
+* Formatting: Use `rustfmt`
