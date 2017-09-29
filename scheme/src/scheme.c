@@ -2,15 +2,15 @@
 MIT License
 Copyright Michael Lazear (c) 2016 */
 
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <stdbool.h>
 #include <ctype.h>
-#include <unistd.h>
-#include <sys/wait.h>
 #include <errno.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #define null(x) ((x) == NULL || (x) == NIL)
 #define EOL(x) (null((x)) || (x) == EMPTY_LIST)
@@ -41,6 +41,9 @@ primitive functions */
 struct object {
     char gc;
     type_t type;
+    bool mark;
+    struct object *gc_next,
+        *gc_prev; // have all objects hold themselves in a doubly linked list
     union {
         int64_t integer;
         char *string;
@@ -70,6 +73,7 @@ static struct object *IF;
 static struct object *LAMBDA;
 static struct object *BEGIN;
 static struct object *PROCEDURE;
+static struct object *GC_HEAD;
 
 void print_exp(char *, struct object *);
 bool is_tagged(struct object *cell, struct object *tag);
@@ -80,6 +84,7 @@ struct object *load_file(struct object *args);
 struct object *cdr(struct object *);
 struct object *car(struct object *);
 struct object *lookup_variable(struct object *var, struct object *env);
+void mark_object(struct object *);
 
 /*==============================================================================
 Hash table for saving Lisp symbol objects. Conserves memory and faster compares
@@ -115,6 +120,12 @@ void ht_insert(struct object *key) {
     HTABLE[h].key = key;
 }
 
+void ht_delete(struct object *key) {
+    uint64_t h = hash(key->string);
+    HTABLE[h].key = 0;
+    printf("deleting some hash: %s\n", key->string);
+}
+
 struct object *ht_lookup(char *s) {
     uint64_t h = hash(s);
     return HTABLE[h].key;
@@ -127,8 +138,108 @@ int alloc_count = 0;
 
 struct object *alloc() {
     struct object *ret = malloc(sizeof(struct object));
+    ret->gc_prev = NULL;
+    if (null(GC_HEAD)) {
+        GC_HEAD = ret;
+        ret->gc_prev = NULL;
+        ret->gc_next = NULL;
+    } else {
+        ret->gc_next = GC_HEAD;
+        GC_HEAD->gc_prev = ret;
+        GC_HEAD = ret;
+    }
+    ret->mark = true;
     alloc_count++;
     return ret;
+}
+
+void mark_list(struct object *obj) {
+#ifdef STRICT
+    print_exp("\nmarking list: ", obj);
+#endif // STRICT
+    obj->mark = false;
+    if (!null(obj->car))
+        mark_object(obj->car);
+    if (!null(obj->cdr))
+        mark_object(obj->cdr);
+}
+
+void mark_vector(struct object *obj) {
+#ifdef STRICT
+    print_exp("\nmarking vector: ", obj);
+#endif // STRICT
+    obj->mark = false;
+    for (int i = 0; i < obj->vsize; i++) {
+        if (!null(obj->vector[i]))
+            mark_object(obj->vector[i]);
+    }
+}
+
+void mark_object(struct object *obj) {
+    switch (obj->type) {
+    case INTEGER:
+    case STRING:
+        obj->mark = false;
+        break;
+    case LIST:
+        mark_list(obj);
+        break;
+    case VECTOR:
+        mark_vector(obj);
+        break;
+    default:
+        break;
+    }
+}
+
+void collect_hashed(struct object *obj) {
+    ht_delete(obj);
+    free(obj->string);
+}
+
+void debug_gc(struct object *obj) {
+    char *types[6] = {"INTEGER", "SYMBOL",    "STRING",
+                      "LIST",    "PRIMITIVE", "VECTOR"};
+    printf("\nCollecting object at %p, of type %s, value: ", (void *)obj,
+           types[obj->type]);
+    print_exp(NULL, obj);
+    printf("\n");
+}
+
+size_t gc_sweep() {
+    struct object *obj = GC_HEAD;
+    struct object *tmp;
+    size_t freed = 0;
+    while (!null(obj)) {
+        if (!obj->mark || obj->type == PRIMITIVE || obj->type == SYMBOL) {
+            obj->mark = true;
+            obj = obj->gc_next;
+        } else {
+
+            if (obj->gc_next != NULL)
+                obj->gc_next->gc_prev = obj->gc_prev;
+            if (obj->gc_prev != NULL)
+                obj->gc_prev->gc_next = obj->gc_next;
+
+            if (obj == GC_HEAD)
+                GC_HEAD = obj->gc_next;
+
+            tmp = obj->gc_next;
+            debug_gc(obj);
+            if (obj->type == STRING)
+                collect_hashed(obj);
+            free(obj);
+            obj = tmp;
+            freed++;
+        }
+    }
+    printf("In this sweep, freed: %ld objects.\n", freed);
+    return freed;
+}
+
+void gc_pass() {
+    mark_object(ENV);
+    gc_sweep();
 }
 
 /*============================================================================
@@ -711,7 +822,6 @@ struct object *eval_sequence(struct object *exps, struct object *env) {
 }
 
 struct object *eval(struct object *exp, struct object *env) {
-
 tail:
     if (null(exp) || exp == EMPTY_LIST) {
         return NIL;
@@ -786,8 +896,9 @@ tail:
                 vals = cons(cadar(*tmp), vals);
             }
             /* Define the named let as a lambda function */
-            define_variable(cadr(exp), eval(make_lambda(vars, cdr(cddr(exp))),
-                                            extend_env(vars, vals, env)),
+            define_variable(cadr(exp),
+                            eval(make_lambda(vars, cdr(cddr(exp))),
+                                 extend_env(vars, vals, env)),
                             env);
             /* Then evaluate the lambda function with the starting values */
             exp = cons(cadr(exp), vals);
@@ -915,8 +1026,8 @@ struct object *load_file(struct object *args) {
     printf("Evaluating file %s\n", filename);
     FILE *fp = fopen(filename, "r");
     if (fp == NULL) {
-    	printf("Error opening file %s\n", filename);
-    	return fp;
+        printf("Error opening file %s\n", filename);
+        return fp;
     }
 
     for (;;) {
@@ -924,12 +1035,14 @@ struct object *load_file(struct object *args) {
         if (null(exp))
             break;
         ret = eval(exp, ENV);
+        gc_pass();
     }
     fclose(fp);
     return ret;
 }
 
 int main(int argc, char **argv) {
+    GC_HEAD = NULL;
     int NELEM = 8191;
     ht_init(NELEM);
     init_env();
@@ -943,6 +1056,7 @@ int main(int argc, char **argv) {
     for (;;) {
         printf("user> ");
         exp = eval(read_exp(stdin), ENV);
+        gc_pass();
         if (!null(exp)) {
             print_exp("====>", exp);
             printf("\n");
