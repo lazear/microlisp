@@ -1,4 +1,6 @@
 # microlisp
+[![Build Status](https://travis-ci.org/lazear/microlisp.svg?branch=master)](https://travis-ci.org/lazear/microlisp)
+
 A set of minimal LISP implementations.
 
 !["I've just received word that the Emperor has dissolved the MIT computer science program permanently."](https://imgs.xkcd.com/comics/lisp_cycles.png)
