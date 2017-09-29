@@ -176,6 +176,8 @@ void mark_vector(struct object *obj) {
 }
 
 void mark_object(struct object *obj) {
+    // FIXME: some buggy stuff going on when the environment gets set to an
+    // empty list
     switch (obj->type) {
     case INTEGER:
     case STRING:
@@ -210,12 +212,11 @@ size_t gc_sweep() {
     struct object *obj = GC_HEAD;
     struct object *tmp;
     size_t freed = 0;
-    while (!null(obj)) {
+    while (obj != NULL) {
         if (!obj->mark || obj->type == PRIMITIVE || obj->type == SYMBOL) {
             obj->mark = true;
             obj = obj->gc_next;
         } else {
-
             if (obj->gc_next != NULL)
                 obj->gc_next->gc_prev = obj->gc_prev;
             if (obj->gc_prev != NULL)
