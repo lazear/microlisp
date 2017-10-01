@@ -83,7 +83,6 @@ struct object *load_file(struct object *args);
 struct object *cdr(struct object *);
 struct object *car(struct object *);
 struct object *lookup_variable(struct object *var, struct object *env);
-void mark_object(struct object *);
 
 /*==============================================================================
 Hash table for saving Lisp symbol objects. Conserves memory and faster compares
@@ -136,6 +135,8 @@ int total_alloc = 0;
 int current_alloc = 0;
 
 static struct object *GC_HEAD;
+
+void mark_object(struct object *);
 
 struct object *alloc() {
     // TODO: maybe create a allocation pool?
@@ -949,9 +950,17 @@ tail:
     return NIL;
 }
 
+/* NOTE: might want to move this to occur every eval call.
+   Currently only runs the GC at the end of evalutating a file, or after a repl
+   prompt.*/
 struct object *gc_eval(struct object *exp, struct object *env) {
     struct object *ret = eval(exp, env);
+    mark_object(ret);
+#ifdef FORCE_GC // if forcing gc, always run
+    gc_pass();
+#else
     run_gc();
+#endif
     return ret;
 }
 
