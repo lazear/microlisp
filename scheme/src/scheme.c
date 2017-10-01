@@ -168,7 +168,8 @@ void mark_vector(struct object *obj) {
 }
 
 void mark_object(struct object *obj) {
-    if (obj == NULL || obj->mark) return;
+    if (obj == NULL || obj->mark)
+        return;
     switch (obj->type) {
     case LIST:
         mark_list(obj);
@@ -208,7 +209,8 @@ int gc_sweep() {
         } else {
             if (prev != NULL)
                 prev->gc_next = obj->gc_next;
-            if (obj == GC_HEAD) // object was the gc head, so move everything down one
+            if (obj ==
+                GC_HEAD) // object was the gc head, so move everything down one
                 GC_HEAD = obj->gc_next;
 
             tmp = obj;
@@ -225,7 +227,6 @@ int gc_sweep() {
     }
     return freed;
 }
-
 
 /* invoke the garbage collector */
 int gc_pass() {
@@ -575,11 +576,9 @@ struct object *prim_vec(struct object *args) {
     return make_vector(car(args)->integer);
 }
 
-
 struct object *prim_current_alloc(struct object *args) {
     return make_integer(current_alloc);
 }
-
 
 struct object *prim_total_alloc(struct object *args) {
     return make_integer(total_alloc);
