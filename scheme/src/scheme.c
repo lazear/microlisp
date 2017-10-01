@@ -161,7 +161,8 @@ void mark_list(struct object *obj) {
 
 void mark_vector(struct object *obj) {
     obj->mark = true;
-    for (int i = 0; i < obj->vsize; i++) {
+    int i;
+    for (i = 0; i < obj->vsize; i++) {
         if (obj->vector[i] != NULL)
             mark_object(obj->vector[i]);
     }
