@@ -155,13 +155,11 @@ struct object *alloc() {
 }
 
 void mark_list(struct object *obj) {
-    obj->mark = true;
     mark_object(obj->car);
     mark_object(obj->cdr);
 }
 
 void mark_vector(struct object *obj) {
-    obj->mark = true;
     int i;
     for (i = 0; i < obj->vsize; i++) {
         if (obj->vector[i] != NULL)
@@ -172,6 +170,7 @@ void mark_vector(struct object *obj) {
 void mark_object(struct object *obj) {
     if (obj == NULL || obj->mark)
         return;
+    obj->mark = true;
     switch (obj->type) {
     case LIST:
         mark_list(obj);
@@ -180,7 +179,6 @@ void mark_object(struct object *obj) {
         mark_vector(obj);
         break;
     default:
-        obj->mark = true;
         break;
     }
 }
@@ -822,6 +820,8 @@ void print_exp(char *str, struct object *e) {
 LISP evaluator
 ==============================================================================*/
 
+struct object *gc_eval(struct object *, struct object *);
+
 struct object *evlis(struct object *exp, struct object *env) {
     if (null(exp))
         return NIL;
@@ -830,16 +830,18 @@ struct object *evlis(struct object *exp, struct object *env) {
 
 struct object *eval_sequence(struct object *exps, struct object *env) {
     if (null(cdr(exps)))
-        return eval(car(exps), env);
-    eval(car(exps), env);
+        return gc_eval(car(exps), env);
+    gc_eval(car(exps), env);
     return eval_sequence(cdr(exps), env);
 }
 
 struct object *eval(struct object *exp, struct object *env) {
 tail:
+    mark_object(exp);
     if (null(exp) || exp == EMPTY_LIST) {
         return NIL;
     } else if (exp->type == INTEGER || exp->type == STRING) {
+        mark_object(exp);
         return exp;
     } else if (exp->type == SYMBOL) {
         struct object *s = lookup_variable(exp, env);
@@ -849,24 +851,25 @@ tail:
             printf("\n");
         }
 #endif
+        mark_object(s);
         return s;
     } else if (is_tagged(exp, QUOTE)) {
         return cadr(exp);
     } else if (is_tagged(exp, LAMBDA)) {
         return make_procedure(cadr(exp), cddr(exp), env);
     } else if (is_tagged(exp, DEFINE)) {
-        if (atom(cadr(exp)))
-            define_variable(cadr(exp), eval(caddr(exp), env), env);
-        else {
+        if (atom(cadr(exp))) {
+            define_variable(cadr(exp), gc_eval(caddr(exp), env), env);
+        } else {
             struct object *closure =
-                eval(make_lambda(cdr(cadr(exp)), cddr(exp)), env);
+                gc_eval(make_lambda(cdr(cadr(exp)), cddr(exp)), env);
             define_variable(car(cadr(exp)), closure, env);
         }
         return make_symbol("ok");
     } else if (is_tagged(exp, BEGIN)) {
         struct object *args = cdr(exp);
         for (; !null(cdr(args)); args = cdr(args))
-            eval(car(args), env);
+            gc_eval(car(args), env);
         exp = car(args);
         goto tail;
     } else if (is_tagged(exp, IF)) {
@@ -874,14 +877,14 @@ tail:
         exp = (not_false(predicate)) ? caddr(exp) : cadddr(exp);
         goto tail;
     } else if (is_tagged(exp, make_symbol("or"))) {
-        struct object *predicate = eval(cadr(exp), env);
+        struct object *predicate = gc_eval(cadr(exp), env);
         exp = (not_false(predicate)) ? caddr(exp) : cadddr(exp);
         goto tail;
     } else if (is_tagged(exp, make_symbol("cond"))) {
         struct object *branch = cdr(exp);
         for (; !null(branch); branch = cdr(branch)) {
             if (is_tagged(car(branch), make_symbol("else")) ||
-                not_false(eval(caar(branch), env))) {
+                not_false(gc_eval(caar(branch), env))) {
                 exp = cons(BEGIN, cdar(branch));
                 goto tail;
             }
@@ -889,10 +892,10 @@ tail:
         return NIL;
     } else if (is_tagged(exp, SET)) {
         if (atom(cadr(exp)))
-            set_variable(cadr(exp), eval(caddr(exp), env), env);
+            set_variable(cadr(exp), gc_eval(caddr(exp), env), env);
         else {
             struct object *closure =
-                eval(make_lambda(cdr(cadr(exp)), cddr(exp)), env);
+                gc_eval(make_lambda(cdr(cadr(exp)), cddr(exp)), env);
             set_variable(car(cadr(exp)), closure, env);
         }
         return make_symbol("ok");
@@ -911,7 +914,7 @@ tail:
             }
             /* Define the named let as a lambda function */
             define_variable(cadr(exp),
-                            eval(make_lambda(vars, cdr(cddr(exp))),
+                            gc_eval(make_lambda(vars, cdr(cddr(exp))),
                                  extend_env(vars, vals, env)),
                             env);
             /* Then evaluate the lambda function with the starting values */
@@ -950,9 +953,6 @@ tail:
     return NIL;
 }
 
-/* NOTE: might want to move this to occur every eval call.
-   Currently only runs the GC at the end of evalutating a file, or after a repl
-   prompt.*/
 struct object *gc_eval(struct object *exp, struct object *env) {
     struct object *ret = eval(exp, env);
     mark_object(ret);
@@ -1068,9 +1068,9 @@ struct object *load_file(struct object *args) {
         exp = read_exp(fp);
         if (null(exp))
             break;
-        ret = eval(exp, ENV);
+        mark_object(exp);
+        ret = gc_eval(exp, ENV);
     }
-    run_gc();
     fclose(fp);
     return ret;
 }
