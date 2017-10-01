@@ -134,6 +134,8 @@ struct object *ht_lookup(char *s) {
 int total_alloc = 0;
 int current_alloc = 0;
 
+void run_gc(struct object *);
+
 static struct object *GC_HEAD;
 
 void mark_object(struct object *);
@@ -148,7 +150,7 @@ struct object *alloc() {
         ret->gc_next = GC_HEAD;
         GC_HEAD = ret;
     }
-    ret->mark = false;
+    ret->mark = true;
     total_alloc++;
     current_alloc++;
     return ret;
@@ -229,17 +231,22 @@ int gc_sweep() {
 }
 
 /* invoke the garbage collector */
-int gc_pass() {
+int gc_pass(struct object *env) {
+    mark_object(env);
     mark_object(ENV);
     return gc_sweep();
 }
 
 /* invoke the garbage collector if above threshold */
-void run_gc() {
+void run_gc(struct object *env) {
+#ifdef FORCE_GC
+    gc_pass(env);
+    return;
+#endif
     if (null(GC_THRESHOLD))
         return;
     if (current_alloc > GC_THRESHOLD->integer)
-        gc_pass();
+        gc_pass(env);
 }
 
 /*============================================================================
@@ -585,7 +592,7 @@ struct object *prim_total_alloc(struct object *args) {
 }
 
 struct object *prim_gc_pass(struct object *args) {
-    return make_integer(gc_pass());
+    return make_integer(gc_pass(ENV));
 }
 
 /*==============================================================================
@@ -820,8 +827,6 @@ void print_exp(char *str, struct object *e) {
 LISP evaluator
 ==============================================================================*/
 
-struct object *gc_eval(struct object *, struct object *);
-
 struct object *evlis(struct object *exp, struct object *env) {
     if (null(exp))
         return NIL;
@@ -830,8 +835,8 @@ struct object *evlis(struct object *exp, struct object *env) {
 
 struct object *eval_sequence(struct object *exps, struct object *env) {
     if (null(cdr(exps)))
-        return gc_eval(car(exps), env);
-    gc_eval(car(exps), env);
+        return eval(car(exps), env);
+    eval(car(exps), env);
     return eval_sequence(cdr(exps), env);
 }
 
@@ -841,7 +846,6 @@ tail:
     if (null(exp) || exp == EMPTY_LIST) {
         return NIL;
     } else if (exp->type == INTEGER || exp->type == STRING) {
-        mark_object(exp);
         return exp;
     } else if (exp->type == SYMBOL) {
         struct object *s = lookup_variable(exp, env);
@@ -851,7 +855,6 @@ tail:
             printf("\n");
         }
 #endif
-        mark_object(s);
         return s;
     } else if (is_tagged(exp, QUOTE)) {
         return cadr(exp);
@@ -859,17 +862,17 @@ tail:
         return make_procedure(cadr(exp), cddr(exp), env);
     } else if (is_tagged(exp, DEFINE)) {
         if (atom(cadr(exp))) {
-            define_variable(cadr(exp), gc_eval(caddr(exp), env), env);
+            define_variable(cadr(exp), eval(caddr(exp), env), env);
         } else {
             struct object *closure =
-                gc_eval(make_lambda(cdr(cadr(exp)), cddr(exp)), env);
+                eval(make_lambda(cdr(cadr(exp)), cddr(exp)), env);
             define_variable(car(cadr(exp)), closure, env);
         }
         return make_symbol("ok");
     } else if (is_tagged(exp, BEGIN)) {
         struct object *args = cdr(exp);
         for (; !null(cdr(args)); args = cdr(args))
-            gc_eval(car(args), env);
+            eval(car(args), env);
         exp = car(args);
         goto tail;
     } else if (is_tagged(exp, IF)) {
@@ -877,14 +880,14 @@ tail:
         exp = (not_false(predicate)) ? caddr(exp) : cadddr(exp);
         goto tail;
     } else if (is_tagged(exp, make_symbol("or"))) {
-        struct object *predicate = gc_eval(cadr(exp), env);
+        struct object *predicate = eval(cadr(exp), env);
         exp = (not_false(predicate)) ? caddr(exp) : cadddr(exp);
         goto tail;
     } else if (is_tagged(exp, make_symbol("cond"))) {
         struct object *branch = cdr(exp);
         for (; !null(branch); branch = cdr(branch)) {
             if (is_tagged(car(branch), make_symbol("else")) ||
-                not_false(gc_eval(caar(branch), env))) {
+                not_false(eval(caar(branch), env))) {
                 exp = cons(BEGIN, cdar(branch));
                 goto tail;
             }
@@ -892,10 +895,10 @@ tail:
         return NIL;
     } else if (is_tagged(exp, SET)) {
         if (atom(cadr(exp)))
-            set_variable(cadr(exp), gc_eval(caddr(exp), env), env);
+            set_variable(cadr(exp), eval(caddr(exp), env), env);
         else {
             struct object *closure =
-                gc_eval(make_lambda(cdr(cadr(exp)), cddr(exp)), env);
+                eval(make_lambda(cdr(cadr(exp)), cddr(exp)), env);
             set_variable(car(cadr(exp)), closure, env);
         }
         return make_symbol("ok");
@@ -914,7 +917,7 @@ tail:
             }
             /* Define the named let as a lambda function */
             define_variable(cadr(exp),
-                            gc_eval(make_lambda(vars, cdr(cddr(exp))),
+                            eval(make_lambda(vars, cdr(cddr(exp))),
                                  extend_env(vars, vals, env)),
                             env);
             /* Then evaluate the lambda function with the starting values */
@@ -951,17 +954,6 @@ tail:
     print_exp("Invalid arguments to eval:", exp);
     printf("\n");
     return NIL;
-}
-
-struct object *gc_eval(struct object *exp, struct object *env) {
-    struct object *ret = eval(exp, env);
-    mark_object(ret);
-#ifdef FORCE_GC // if forcing gc, always run
-    gc_pass();
-#else
-    run_gc();
-#endif
-    return ret;
 }
 
 extern char **environ;
@@ -1068,8 +1060,7 @@ struct object *load_file(struct object *args) {
         exp = read_exp(fp);
         if (null(exp))
             break;
-        mark_object(exp);
-        ret = gc_eval(exp, ENV);
+        ret = eval(exp, ENV);
     }
     fclose(fp);
     return ret;
@@ -1089,10 +1080,11 @@ int main(int argc, char **argv) {
 
     for (;;) {
         printf("user> ");
-        exp = gc_eval(read_exp(stdin), ENV);
+        exp = eval(read_exp(stdin), ENV);
         if (!null(exp)) {
             print_exp("====>", exp);
             printf("\n");
         }
+        run_gc(ENV);
     }
 }
