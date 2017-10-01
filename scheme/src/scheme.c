@@ -42,8 +42,7 @@ struct object {
     char gc;
     type_t type;
     bool mark;
-    struct object *gc_next,
-        *gc_prev; // have all objects hold themselves in a doubly linked list
+    struct object *gc_next;
     union {
         int64_t integer;
         char *string;
@@ -73,7 +72,7 @@ static struct object *IF;
 static struct object *LAMBDA;
 static struct object *BEGIN;
 static struct object *PROCEDURE;
-static struct object *GC_HEAD;
+static struct object *GC_THRESHOLD;
 
 void print_exp(char *, struct object *);
 bool is_tagged(struct object *cell, struct object *tag);
@@ -123,7 +122,6 @@ void ht_insert(struct object *key) {
 void ht_delete(struct object *key) {
     uint64_t h = hash(key->string);
     HTABLE[h].key = 0;
-    printf("deleting some hash: %s\n", key->string);
 }
 
 struct object *ht_lookup(char *s) {
@@ -132,57 +130,46 @@ struct object *ht_lookup(char *s) {
 }
 
 /*==============================================================================
-  Memory management - Currently no GC
+  Memory management
 ==============================================================================*/
-int alloc_count = 0;
+int total_alloc = 0;
+int current_alloc = 0;
+
+static struct object *GC_HEAD;
 
 struct object *alloc() {
+    // TODO: maybe create a allocation pool?
     struct object *ret = malloc(sizeof(struct object));
-    ret->gc_prev = NULL;
-    if (null(GC_HEAD)) {
+    if (GC_HEAD == NULL) {
         GC_HEAD = ret;
-        ret->gc_prev = NULL;
         ret->gc_next = NULL;
     } else {
         ret->gc_next = GC_HEAD;
-        GC_HEAD->gc_prev = ret;
         GC_HEAD = ret;
     }
-    ret->mark = true;
-    alloc_count++;
+    ret->mark = false;
+    total_alloc++;
+    current_alloc++;
     return ret;
 }
 
 void mark_list(struct object *obj) {
-#ifdef STRICT
-    print_exp("\nmarking list: ", obj);
-#endif // STRICT
-    obj->mark = false;
-    if (!null(obj->car))
-        mark_object(obj->car);
-    if (!null(obj->cdr))
-        mark_object(obj->cdr);
+    obj->mark = true;
+    mark_object(obj->car);
+    mark_object(obj->cdr);
 }
 
 void mark_vector(struct object *obj) {
-#ifdef STRICT
-    print_exp("\nmarking vector: ", obj);
-#endif // STRICT
-    obj->mark = false;
+    obj->mark = true;
     for (int i = 0; i < obj->vsize; i++) {
-        if (!null(obj->vector[i]))
+        if (obj->vector[i] != NULL)
             mark_object(obj->vector[i]);
     }
 }
 
 void mark_object(struct object *obj) {
-    // FIXME: some buggy stuff going on when the environment gets set to an
-    // empty list
+    if (obj == NULL || obj->mark) return;
     switch (obj->type) {
-    case INTEGER:
-    case STRING:
-        obj->mark = false;
-        break;
     case LIST:
         mark_list(obj);
         break;
@@ -190,6 +177,7 @@ void mark_object(struct object *obj) {
         mark_vector(obj);
         break;
     default:
+        obj->mark = true;
         break;
     }
 }
@@ -208,39 +196,49 @@ void debug_gc(struct object *obj) {
     printf("\n");
 }
 
-size_t gc_sweep() {
+int gc_sweep() {
     struct object *obj = GC_HEAD;
-    struct object *tmp;
-    size_t freed = 0;
+    struct object *tmp, *prev = NULL;
+    int freed = 0;
     while (obj != NULL) {
-        if (!obj->mark || obj->type == PRIMITIVE || obj->type == SYMBOL) {
-            obj->mark = true;
+        if (obj->mark) {
+            obj->mark = false;
+            prev = obj;
             obj = obj->gc_next;
         } else {
-            if (obj->gc_next != NULL)
-                obj->gc_next->gc_prev = obj->gc_prev;
-            if (obj->gc_prev != NULL)
-                obj->gc_prev->gc_next = obj->gc_next;
-
-            if (obj == GC_HEAD)
+            if (prev != NULL)
+                prev->gc_next = obj->gc_next;
+            if (obj == GC_HEAD) // object was the gc head, so move everything down one
                 GC_HEAD = obj->gc_next;
 
-            tmp = obj->gc_next;
-            debug_gc(obj);
-            if (obj->type == STRING)
-                collect_hashed(obj);
-            free(obj);
-            obj = tmp;
+            tmp = obj;
+            obj = obj->gc_next;
+#ifdef DEBUG_GC
+            debug_gc(tmp);
+#endif
+            if (tmp->type == STRING || tmp->type == SYMBOL)
+                collect_hashed(tmp);
+            free(tmp);
             freed++;
+            current_alloc--;
         }
     }
-    printf("In this sweep, freed: %ld objects.\n", freed);
     return freed;
 }
 
-void gc_pass() {
+
+/* invoke the garbage collector */
+int gc_pass() {
     mark_object(ENV);
-    gc_sweep();
+    return gc_sweep();
+}
+
+/* invoke the garbage collector if above threshold */
+void run_gc() {
+    if (null(GC_THRESHOLD))
+        return;
+    if (current_alloc > GC_THRESHOLD->integer)
+        gc_pass();
 }
 
 /*============================================================================
@@ -575,6 +573,20 @@ struct object *prim_vset(struct object *args) {
 struct object *prim_vec(struct object *args) {
     ASSERT_TYPE(car(args), INTEGER);
     return make_vector(car(args)->integer);
+}
+
+
+struct object *prim_current_alloc(struct object *args) {
+    return make_integer(current_alloc);
+}
+
+
+struct object *prim_total_alloc(struct object *args) {
+    return make_integer(total_alloc);
+}
+
+struct object *prim_gc_pass(struct object *args) {
+    return make_integer(gc_pass());
 }
 
 /*==============================================================================
@@ -937,6 +949,12 @@ tail:
     return NIL;
 }
 
+struct object *gc_eval(struct object *exp, struct object *env) {
+    struct object *ret = eval(exp, env);
+    run_gc();
+    return ret;
+}
+
 extern char **environ;
 struct object *prim_exec(struct object *args) {
     ASSERT_TYPE(car(args), STRING);
@@ -984,6 +1002,9 @@ void init_env() {
     add_sym("if", IF);
     define_variable(make_symbol("true"), TRUE, ENV);
     define_variable(make_symbol("false"), FALSE, ENV);
+    // default garbage collector threshold of 255 objects
+    GC_THRESHOLD = make_symbol("gc-threshold");
+    define_variable(GC_THRESHOLD, make_integer(255), ENV);
 
     add_prim("cons", prim_cons);
     add_prim("car", prim_car);
@@ -1017,6 +1038,9 @@ void init_env() {
     add_prim("vector", prim_vec);
     add_prim("vector-get", prim_vget);
     add_prim("vector-set", prim_vset);
+    add_prim("current-allocated", prim_current_alloc);
+    add_prim("total-allocated", prim_total_alloc);
+    add_prim("gc-pass", prim_gc_pass);
 }
 
 /* Loads and evaluates a file containing lisp s-expressions */
@@ -1036,8 +1060,8 @@ struct object *load_file(struct object *args) {
         if (null(exp))
             break;
         ret = eval(exp, ENV);
-        gc_pass();
     }
+    run_gc();
     fclose(fp);
     return ret;
 }
@@ -1056,8 +1080,7 @@ int main(int argc, char **argv) {
 
     for (;;) {
         printf("user> ");
-        exp = eval(read_exp(stdin), ENV);
-        gc_pass();
+        exp = gc_eval(read_exp(stdin), ENV);
         if (!null(exp)) {
             print_exp("====>", exp);
             printf("\n");
