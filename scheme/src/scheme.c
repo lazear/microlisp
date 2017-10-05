@@ -83,6 +83,7 @@ struct object *load_file(void *, struct object *args);
 struct object *cdr(struct object *);
 struct object *car(struct object *);
 struct object *lookup_variable(struct object *var, struct object *env);
+struct object *make_symbol(void *, char *);
 
 /*==============================================================================
   Hash table for saving Lisp symbol objects. Conserves memory and faster
@@ -151,6 +152,8 @@ void *workspace_base[2] = {(void *)1, NULL};
 
 int total_alloc = 0;
 int current_alloc = 0;
+
+bool gc_off = false;
 
 void run_gc(void *);
 
@@ -282,14 +285,19 @@ int gc_pass(void *workspace) {
 
 /* invoke the garbage collector if above threshold */
 void run_gc(void *workspace) {
+    if (gc_off) return;
 #ifdef FORCE_GC
     gc_pass(workspace);
     return;
 #endif
-    if (null(GC_THRESHOLD))
-        return;
-    if (current_alloc > GC_THRESHOLD->integer)
+    gc_off = true; // turn off the gc while we run
+    struct object *threshold = lookup_variable(make_symbol(workspace, "gc-threshold"), ENV);
+    if (null(threshold)) goto LEAVE_GC;
+    if (current_alloc > threshold->integer)
         gc_pass(workspace);
+ LEAVE_GC:
+    gc_off = false;
+    return;
 }
 
 /*============================================================================
