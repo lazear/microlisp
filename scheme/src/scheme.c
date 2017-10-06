@@ -152,12 +152,11 @@ void *workspace_base[2] = {(void *)1, NULL};
 int total_alloc = 0;
 int current_alloc = 0;
 
-bool gc_off = false;
-
-void run_gc(void *);
+size_t gc_threshold = 500;
 
 static struct object *GC_HEAD = NULL;
 
+void run_gc(void *);
 void mark_object(struct object *);
 
 struct object *alloc(void *workspace) {
@@ -284,21 +283,12 @@ int gc_pass(void *workspace) {
 
 /* invoke the garbage collector if above threshold */
 void run_gc(void *workspace) {
-    if (gc_off)
-        return;
 #ifdef FORCE_GC
     gc_pass(workspace);
     return;
 #endif
-    gc_off = true; // turn off the gc while we run
-    struct object *threshold =
-        lookup_variable(make_symbol(workspace, "gc-threshold"), ENV);
-    if (null(threshold))
-        goto LEAVE_GC;
-    if (current_alloc > threshold->integer)
+    if (current_alloc > gc_threshold)
         gc_pass(workspace);
-LEAVE_GC:
-    gc_off = false;
     return;
 }
 
@@ -668,6 +658,12 @@ struct object *prim_total_alloc(void *workspace, struct object *args) {
 
 struct object *prim_gc_pass(void *workspace, struct object *args) {
     return make_integer(workspace, gc_pass(workspace));
+}
+
+struct object *prim_set_gc_threshold(void *workspace, struct object *args) {
+    ASSERT_TYPE(car(args), INTEGER);
+    gc_threshold = car(args)->integer;
+    return car(args);
 }
 
 /*==============================================================================
@@ -1122,10 +1118,6 @@ void init_env(void *workspace) {
     define_variable(workspace, make_symbol(workspace, "true"), TRUE, ENV);
     define_variable(workspace, make_symbol(workspace, "false"), FALSE, ENV);
 
-    // default garbage collector threshold of 500 objects
-    tmp_sym = make_symbol(workspace, "gc-threshold");
-    define_variable(workspace, tmp_sym, make_integer(workspace, 500), ENV);
-
     add_prim("cons", prim_cons);
     add_prim("car", prim_car);
     add_prim("cdr", prim_cdr);
@@ -1161,6 +1153,7 @@ void init_env(void *workspace) {
     add_prim("current-allocated", prim_current_alloc);
     add_prim("total-allocated", prim_total_alloc);
     add_prim("gc-pass", prim_gc_pass);
+    add_prim("set-gc-threshold",  prim_set_gc_threshold);
 }
 
 /* Loads and evaluates a file containing lisp s-expressions */
