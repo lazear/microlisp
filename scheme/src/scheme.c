@@ -1098,16 +1098,16 @@ struct object *prim_exec(void *workspace, struct object *args) {
 void init_env(void *workspace) {
 #define add_prim(s, c)                                                         \
     tmp_sym = make_symbol(workspace, s);                                       \
-    set_local(0, tmp_sym);                                                     \
     define_variable(workspace, tmp_sym, make_primitive(workspace, c), ENV)
 #define add_sym(s, c)                                                          \
     do {                                                                       \
         c = make_symbol(workspace, s);                                         \
-        set_local(0, c);                                                       \
+        set_local(1, c);                                                       \
         define_variable(workspace, c, c, ENV);                                 \
     } while (0);
-    create_workspace(1);
     struct object *tmp_sym = NULL;
+    create_workspace(2);
+    set_local(0, tmp_sym);
     ENV = extend_env(workspace, NIL, NIL, NIL);
     add_sym("#t", TRUE);
     add_sym("#f", FALSE);
