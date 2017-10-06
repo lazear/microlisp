@@ -72,7 +72,6 @@ static struct object *IF = NULL;
 static struct object *LAMBDA = NULL;
 static struct object *BEGIN = NULL;
 static struct object *PROCEDURE = NULL;
-static struct object *GC_THRESHOLD = NULL;
 
 void print_exp(char *, struct object *);
 bool is_tagged(struct object *cell, struct object *tag);
@@ -181,7 +180,7 @@ struct object *alloc(void *workspace) {
 void mark_object(struct object *obj) {
     if (obj == NULL || obj->mark)
         return;
-#ifdef DEBUG_MARK
+#ifdef DEBUG_GC
     print_exp("marking: ", obj);
     putchar('\n');
 #endif
@@ -215,7 +214,7 @@ void debug_gc(struct object *obj) {
     printf("\nCollecting object at %p, of type %s, value: ", (void *)obj,
            types[obj->type]);
     print_exp(NULL, obj);
-    printf("\n");
+    putchar('\n');
 }
 
 int gc_sweep() {
@@ -230,8 +229,8 @@ int gc_sweep() {
         } else {
             if (prev != NULL)
                 prev->gc_next = obj->gc_next;
-            if (obj ==
-                GC_HEAD) // object was the gc head, so move everything down one
+            // object was the gc head, so move everything down one
+            if (obj == GC_HEAD)
                 GC_HEAD = obj->gc_next;
 
             tmp = obj;
@@ -285,17 +284,20 @@ int gc_pass(void *workspace) {
 
 /* invoke the garbage collector if above threshold */
 void run_gc(void *workspace) {
-    if (gc_off) return;
+    if (gc_off)
+        return;
 #ifdef FORCE_GC
     gc_pass(workspace);
     return;
 #endif
     gc_off = true; // turn off the gc while we run
-    struct object *threshold = lookup_variable(make_symbol(workspace, "gc-threshold"), ENV);
-    if (null(threshold)) goto LEAVE_GC;
+    struct object *threshold =
+        lookup_variable(make_symbol(workspace, "gc-threshold"), ENV);
+    if (null(threshold))
+        goto LEAVE_GC;
     if (current_alloc > threshold->integer)
         gc_pass(workspace);
- LEAVE_GC:
+LEAVE_GC:
     gc_off = false;
     return;
 }
@@ -918,8 +920,7 @@ struct object *evlis(void *workspace, struct object *exp, struct object *env) {
     set_local(1, env);
     struct object *tmp = eval(workspace, car(exp), env);
     set_local(2, tmp);
-    return cons(workspace, tmp,
-                evlis(workspace, cdr(exp), env));
+    return cons(workspace, tmp, evlis(workspace, cdr(exp), env));
 }
 
 struct object *eval_sequence(void *workspace, struct object *exps,
@@ -963,7 +964,6 @@ tail:
             struct object *closure =
                 eval(workspace,
                      make_lambda(workspace, cdr(cadr(exp)), cddr(exp)), env);
-            set_local(2, closure);
             define_variable(workspace, car(cadr(exp)), closure, env);
         }
         return make_symbol(workspace, "ok");
@@ -1000,7 +1000,6 @@ tail:
             struct object *closure =
                 eval(workspace,
                      make_lambda(workspace, cdr(cadr(exp)), cddr(exp)), env);
-            set_local(2, closure);
             set_variable(car(cadr(exp)), closure, env);
         }
         return make_symbol(workspace, "ok");
@@ -1098,7 +1097,7 @@ struct object *prim_exec(void *workspace, struct object *args) {
 /* Initialize the global environment, add primitive functions and symbols */
 void init_env(void *workspace) {
 #define add_prim(s, c)                                                         \
-    tmp_sym = make_symbol(workspace, s);                                \
+    tmp_sym = make_symbol(workspace, s);                                       \
     set_local(0, tmp_sym);                                                     \
     define_variable(workspace, tmp_sym, make_primitive(workspace, c), ENV)
 #define add_sym(s, c)                                                          \
@@ -1122,10 +1121,10 @@ void init_env(void *workspace) {
     add_sym("if", IF);
     define_variable(workspace, make_symbol(workspace, "true"), TRUE, ENV);
     define_variable(workspace, make_symbol(workspace, "false"), FALSE, ENV);
-    // default garbage collector threshold of 255 objects
-    GC_THRESHOLD = make_symbol(workspace, "gc-threshold");
-    set_local(0, GC_THRESHOLD);
-    define_variable(workspace, GC_THRESHOLD, make_integer(workspace, 255), ENV);
+
+    // default garbage collector threshold of 500 objects
+    tmp_sym = make_symbol(workspace, "gc-threshold");
+    define_variable(workspace, tmp_sym, make_integer(workspace, 500), ENV);
 
     add_prim("cons", prim_cons);
     add_prim("car", prim_car);
@@ -1168,9 +1167,8 @@ void init_env(void *workspace) {
 struct object *load_file(void *workspace, struct object *args) {
     struct object *exp = NULL;
     struct object *ret = NULL;
-    create_workspace(2);
+    create_workspace(1);
     set_local(0, exp);
-    set_local(1, ret);
     char *filename = car(args)->string;
     printf("Evaluating file %s\n", filename);
     FILE *fp = fopen(filename, "r");
@@ -1197,8 +1195,6 @@ int main(int argc, char **argv) {
     init_env(workspace);
     struct object *exp = NULL;
     int i;
-    create_workspace(2);
-    set_local(1, exp);
 
     printf("uscheme intrepreter - michael lazear (c) 2016-2017\n");
     for (i = 1; i < argc; i++)
