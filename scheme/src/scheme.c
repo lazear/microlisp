@@ -12,6 +12,9 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+// rate to grow allocation each time
+#define GC_GROWTH_FACTOR 1.5
+
 #define null(x) ((x) == NULL || (x) == NIL)
 #define EOL(x) (null((x)) || (x) == EMPTY_LIST)
 #define error(x)                                                               \
@@ -149,30 +152,76 @@ void *workspace_base[2] = {(void *)1, NULL};
 
 #define set_local(pos, var) (((struct object ***)workspace)[pos] = &var)
 
-int total_alloc = 0;
-int current_alloc = 0;
+size_t gc_total_alloc = 0; // total objects allocated
+size_t gc_objects_used = 0; // total objects currently in use
+size_t gc_pool_size = 0; // total objects in pool
+// current objects currently allocated = gc_pool_size + gc_objects_used
 
-size_t gc_threshold = 500;
 
 static struct object *GC_HEAD = NULL;
+static struct object *GC_POOL_HEAD = NULL;
 
-void run_gc(void *);
+int gc_pass(void *);
 void mark_object(struct object *);
+void grow_pool(size_t);
+void shrink_pool(size_t);
+
+void push_object(struct object **head, struct object *obj) {
+    obj->gc_next = *head;
+    *head = obj;
+}
+
+struct object *pop_object(struct object **head) {
+    if (*head == NULL)
+        return NULL;
+    struct object *ret = *head;
+    *head = (*head)->gc_next;
+    return ret;
+}
+
+void gc_pool_maintain(void *workspace) {
+#ifdef FORCE_GC
+    gc_pass(workspace);
+#else
+    if (!gc_pool_size)
+        gc_pass(workspace);
+#endif
+    if (!gc_pool_size)
+        grow_pool(GC_GROWTH_FACTOR * gc_objects_used + 1);
+    else if (gc_pool_size > gc_objects_used * GC_GROWTH_FACTOR) // shrink when we have more objects unused than currently in use * GC_GROWTH_FACTOR
+        shrink_pool(gc_pool_size - gc_objects_used * (GC_GROWTH_FACTOR - 1)); // not sure if this is the best way to determine when to shrink
+}
+
+void grow_pool(size_t n) {
+#ifdef DEBUG_POOL
+    printf("growing pool by %ld\n", n);
+#endif
+    gc_pool_size += n;
+    gc_total_alloc += n;
+    struct object *obj;
+    while (n--) {
+        obj = malloc(sizeof(struct object));
+        push_object(&GC_POOL_HEAD, obj);
+    }
+}
+
+void shrink_pool(size_t n) {
+#ifdef DEBUG_POOL
+    printf("shrinking pool by %ld\n", n);
+#endif
+    gc_pool_size -= n;
+    while (n--) {
+        free(pop_object(&GC_POOL_HEAD));
+    }
+}
 
 struct object *alloc(void *workspace) {
-    // TODO: maybe create a allocation pool?
-    run_gc(workspace);
-    struct object *ret = malloc(sizeof(struct object));
-    if (GC_HEAD == NULL) {
-        GC_HEAD = ret;
-        ret->gc_next = NULL;
-    } else {
-        ret->gc_next = GC_HEAD;
-        GC_HEAD = ret;
-    }
+    gc_pool_maintain(workspace);
+    struct object *ret = pop_object(&GC_POOL_HEAD);
+    push_object(&GC_HEAD, ret);
     ret->mark = false;
-    total_alloc++;
-    current_alloc++;
+    gc_pool_size--;
+    gc_objects_used++;
     return ret;
 }
 
@@ -239,20 +288,13 @@ int gc_sweep() {
 #endif
             if (tmp->type == STRING || tmp->type == SYMBOL)
                 collect_hashed(tmp);
-            free(tmp);
+            push_object(&GC_POOL_HEAD, tmp);
             freed++;
-            current_alloc--;
+            gc_objects_used--;
+            gc_pool_size++;
         }
     }
     return freed;
-}
-
-void unmark_all_objects() {
-    struct object *obj = GC_HEAD;
-    while (obj != NULL) {
-        obj->mark = false;
-        obj = obj->gc_next;
-    }
 }
 
 void gc_mark(void *workspace_root) {
@@ -279,17 +321,6 @@ void gc_mark(void *workspace_root) {
 int gc_pass(void *workspace) {
     gc_mark(workspace);
     return gc_sweep();
-}
-
-/* invoke the garbage collector if above threshold */
-void run_gc(void *workspace) {
-#ifdef FORCE_GC
-    gc_pass(workspace);
-    return;
-#endif
-    if (current_alloc > gc_threshold)
-        gc_pass(workspace);
-    return;
 }
 
 /*============================================================================
@@ -648,22 +679,20 @@ struct object *prim_vec(void *workspace, struct object *args) {
     return make_vector(workspace, car(args)->integer);
 }
 
-struct object *prim_current_alloc(void *workspace, struct object *args) {
-    return make_integer(workspace, current_alloc);
+struct object *prim_gc_objects_used(void *workspace, struct object *args) {
+    return make_integer(workspace, gc_objects_used);
 }
 
-struct object *prim_total_alloc(void *workspace, struct object *args) {
-    return make_integer(workspace, total_alloc);
+struct object *prim_gc_pool_size(void *workspace, struct object *args) {
+    return make_integer(workspace, gc_pool_size);
+}
+
+struct object *prim_gc_total_alloc(void *workspace, struct object *args) {
+    return make_integer(workspace, gc_total_alloc);
 }
 
 struct object *prim_gc_pass(void *workspace, struct object *args) {
     return make_integer(workspace, gc_pass(workspace));
-}
-
-struct object *prim_set_gc_threshold(void *workspace, struct object *args) {
-    ASSERT_TYPE(car(args), INTEGER);
-    gc_threshold = car(args)->integer;
-    return car(args);
 }
 
 /*==============================================================================
@@ -1056,7 +1085,7 @@ tail:
             goto tail;
         }
     }
-    print_exp(" thisis Invalid arguments to eval:", exp);
+    print_exp("Invalid arguments to eval:", exp);
     printf("\n");
     return NIL;
 }
@@ -1150,10 +1179,10 @@ void init_env(void *workspace) {
     add_prim("vector", prim_vec);
     add_prim("vector-get", prim_vget);
     add_prim("vector-set", prim_vset);
-    add_prim("current-allocated", prim_current_alloc);
-    add_prim("total-allocated", prim_total_alloc);
+    add_prim("objects-used", prim_gc_objects_used);
+    add_prim("gc-pool-size", prim_gc_pool_size);
+    add_prim("gc-total-allocated", prim_gc_total_alloc);
     add_prim("gc-pass", prim_gc_pass);
-    add_prim("set-gc-threshold",  prim_set_gc_threshold);
 }
 
 /* Loads and evaluates a file containing lisp s-expressions */
