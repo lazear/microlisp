@@ -12,9 +12,6 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-// rate to grow allocation each time
-#define GC_GROWTH_FACTOR 1.5
-
 #define null(x) ((x) == NULL || (x) == NIL)
 #define EOL(x) (null((x)) || (x) == EMPTY_LIST)
 #define error(x)                                                               \
@@ -152,11 +149,10 @@ void *workspace_base[2] = {(void *)1, NULL};
 
 #define set_local(pos, var) (((struct object ***)workspace)[pos] = &var)
 
-size_t gc_total_alloc = 0; // total objects allocated
+size_t gc_total_alloc = 0; // total objects allocated over the runtime of the interpreter
 size_t gc_objects_used = 0; // total objects currently in use
 size_t gc_pool_size = 0; // total objects in pool
 // current objects currently allocated = gc_pool_size + gc_objects_used
-
 
 static struct object *GC_HEAD = NULL;
 static struct object *GC_POOL_HEAD = NULL;
@@ -183,13 +179,13 @@ void gc_pool_maintain(void *workspace) {
 #ifdef FORCE_GC
     gc_pass(workspace);
 #else
-    if (!gc_pool_size)
+    if (gc_pool_size == gc_objects_used)
         gc_pass(workspace);
 #endif
-    if (!gc_pool_size)
-        grow_pool(GC_GROWTH_FACTOR * gc_objects_used + 1);
-    else if (gc_pool_size > gc_objects_used * GC_GROWTH_FACTOR) // shrink when we have more objects unused than currently in use * GC_GROWTH_FACTOR
-        shrink_pool(gc_pool_size - gc_objects_used * (GC_GROWTH_FACTOR - 1)); // not sure if this is the best way to determine when to shrink
+    if (gc_pool_size == gc_objects_used)
+        grow_pool(0.5 * gc_pool_size + 1); // grow to 150%
+    else if (gc_objects_used < 0.5 * gc_pool_size) // shrink when we have more than 50% unused
+        shrink_pool(gc_pool_size * 0.25); // trim off 25%
 }
 
 void grow_pool(size_t n) {
@@ -220,7 +216,6 @@ struct object *alloc(void *workspace) {
     struct object *ret = pop_object(&GC_POOL_HEAD);
     push_object(&GC_HEAD, ret);
     ret->mark = false;
-    gc_pool_size--;
     gc_objects_used++;
     return ret;
 }
@@ -291,7 +286,6 @@ int gc_sweep() {
             push_object(&GC_POOL_HEAD, tmp);
             freed++;
             gc_objects_used--;
-            gc_pool_size++;
         }
     }
     return freed;
@@ -1179,7 +1173,7 @@ void init_env(void *workspace) {
     add_prim("vector", prim_vec);
     add_prim("vector-get", prim_vget);
     add_prim("vector-set", prim_vset);
-    add_prim("objects-used", prim_gc_objects_used);
+    add_prim("gc-objects-used", prim_gc_objects_used);
     add_prim("gc-pool-size", prim_gc_pool_size);
     add_prim("gc-total-allocated", prim_gc_total_alloc);
     add_prim("gc-pass", prim_gc_pass);
