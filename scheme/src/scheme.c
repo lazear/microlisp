@@ -1,16 +1,16 @@
 /* Single file scheme interpreter
-MIT License
-Copyright Michael Lazear (c) 2016 */
+   MIT License
+   Copyright Michael Lazear (c) 2016 */
 
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <stdbool.h>
 #include <ctype.h>
-#include <unistd.h>
-#include <sys/wait.h>
 #include <errno.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #define null(x) ((x) == NULL || (x) == NIL)
 #define EOL(x) (null((x)) || (x) == EMPTY_LIST)
@@ -31,16 +31,18 @@ Copyright Michael Lazear (c) 2016 */
 #define ASSERT_TYPE(x, t) (__type_check(__func__, x, t))
 
 typedef enum { INTEGER, SYMBOL, STRING, LIST, PRIMITIVE, VECTOR } type_t;
-typedef struct object *(*primitive_t)(struct object *);
+typedef struct object *(*primitive_t)(void *, struct object *);
 
 /* Lisp object. We want to mimic the homoiconicity of LISP, so we will not be
-providing separate "types" for procedures, etc. Everything is represented as
-atoms (integers, strings, booleans) or a list of atoms, except for the
-primitive functions */
+   providing separate "types" for procedures, etc. Everything is represented as
+   atoms (integers, strings, booleans) or a list of atoms, except for the
+   primitive functions */
 
 struct object {
     char gc;
     type_t type;
+    bool mark;
+    struct object *gc_next;
     union {
         int64_t integer;
         char *string;
@@ -57,33 +59,35 @@ struct object {
 } __attribute__((packed));
 
 /* We declare a couple of global variables for keywords */
-static struct object *ENV;
-static struct object *NIL;
-static struct object *EMPTY_LIST;
-static struct object *TRUE;
-static struct object *FALSE;
-static struct object *QUOTE;
-static struct object *DEFINE;
-static struct object *SET;
-static struct object *LET;
-static struct object *IF;
-static struct object *LAMBDA;
-static struct object *BEGIN;
-static struct object *PROCEDURE;
+static struct object *ENV = NULL;
+static struct object *NIL = NULL;
+static struct object *EMPTY_LIST = NULL;
+static struct object *TRUE = NULL;
+static struct object *FALSE = NULL;
+static struct object *QUOTE = NULL;
+static struct object *DEFINE = NULL;
+static struct object *SET = NULL;
+static struct object *LET = NULL;
+static struct object *IF = NULL;
+static struct object *LAMBDA = NULL;
+static struct object *BEGIN = NULL;
+static struct object *PROCEDURE = NULL;
 
 void print_exp(char *, struct object *);
 bool is_tagged(struct object *cell, struct object *tag);
-struct object *read_exp(FILE *in);
-struct object *eval(struct object *exp, struct object *env);
-struct object *cons(struct object *x, struct object *y);
-struct object *load_file(struct object *args);
+struct object *read_exp(void *, FILE *in);
+struct object *eval(void *, struct object *exp, struct object *env);
+struct object *cons(void *, struct object *x, struct object *y);
+struct object *load_file(void *, struct object *args);
 struct object *cdr(struct object *);
 struct object *car(struct object *);
 struct object *lookup_variable(struct object *var, struct object *env);
+struct object *make_symbol(void *, char *);
 
 /*==============================================================================
-Hash table for saving Lisp symbol objects. Conserves memory and faster compares
-==============================================================================*/
+  Hash table for saving Lisp symbol objects. Conserves memory and faster
+  compares
+  ==============================================================================*/
 struct htable {
     struct object *key;
 };
@@ -115,25 +119,207 @@ void ht_insert(struct object *key) {
     HTABLE[h].key = key;
 }
 
+void ht_delete(struct object *key) {
+    uint64_t h = hash(key->string);
+    HTABLE[h].key = 0;
+}
+
 struct object *ht_lookup(char *s) {
     uint64_t h = hash(s);
     return HTABLE[h].key;
 }
 
 /*==============================================================================
-  Memory management - Currently no GC
-==============================================================================*/
-int alloc_count = 0;
+  Memory management
+  ==============================================================================*/
 
-struct object *alloc() {
-    struct object *ret = malloc(sizeof(struct object));
-    alloc_count++;
+/* Store working object pointers in the stack.
+ * each stack will hold reference to parent workspaces, up to this root on here
+ * workspace will always end with a 1 pointer followed by the start address of
+ * the next workspace.
+ */
+void *workspace_base[2] = {(void *)1, NULL};
+
+/* create a workspace, set 1 pointer and set up workspace_root*/
+#define create_workspace(size)                                                 \
+    void *workspace_ARRAY[size + 2] = {0};                                     \
+    workspace_ARRAY[size] = (void *)1;                                         \
+    workspace_ARRAY[size + 1] = workspace;                                     \
+    workspace = workspace_ARRAY;
+
+#define set_local(pos, var) (((struct object ***)workspace)[pos] = &var)
+
+size_t gc_total_alloc = 0; // total objects allocated over the runtime of the interpreter
+size_t gc_objects_used = 0; // total objects currently in use
+size_t gc_pool_size = 0; // total objects in pool
+// current objects currently allocated = gc_pool_size + gc_objects_used
+
+static struct object *GC_HEAD = NULL;
+static struct object *GC_POOL_HEAD = NULL;
+
+int gc_pass(void *);
+void mark_object(struct object *);
+void grow_pool(size_t);
+void shrink_pool(size_t);
+
+void push_object(struct object **head, struct object *obj) {
+    obj->gc_next = *head;
+    *head = obj;
+}
+
+struct object *pop_object(struct object **head) {
+    if (*head == NULL)
+        return NULL;
+    struct object *ret = *head;
+    *head = (*head)->gc_next;
     return ret;
 }
 
+void gc_pool_maintain(void *workspace) {
+#ifdef FORCE_GC
+    gc_pass(workspace);
+#else
+    if (gc_pool_size == gc_objects_used)
+        gc_pass(workspace);
+#endif
+    if (gc_pool_size == gc_objects_used)
+        grow_pool((gc_pool_size >> 1) + 1); // grow to 150%
+    else if (gc_objects_used < gc_pool_size >> 1) // shrink when we have more than 50% unused
+        shrink_pool(gc_pool_size >> 2); // trim off 25%
+}
+
+void grow_pool(size_t n) {
+#ifdef DEBUG_POOL
+    printf("growing pool by %ld\n", n);
+#endif
+    gc_pool_size += n;
+    gc_total_alloc += n;
+    struct object *obj;
+    while (n--) {
+        obj = malloc(sizeof(struct object));
+        push_object(&GC_POOL_HEAD, obj);
+    }
+}
+
+void shrink_pool(size_t n) {
+#ifdef DEBUG_POOL
+    printf("shrinking pool by %ld\n", n);
+#endif
+    gc_pool_size -= n;
+    while (n--) {
+        free(pop_object(&GC_POOL_HEAD));
+    }
+}
+
+struct object *alloc(void *workspace) {
+    gc_pool_maintain(workspace);
+    struct object *ret = pop_object(&GC_POOL_HEAD);
+    push_object(&GC_HEAD, ret);
+    ret->mark = false;
+    gc_objects_used++;
+    return ret;
+}
+
+void mark_object(struct object *obj) {
+    if (obj == NULL || obj->mark)
+        return;
+#ifdef DEBUG_GC
+    print_exp("marking: ", obj);
+    putchar('\n');
+#endif
+    obj->mark = true;
+    switch (obj->type) {
+    case LIST:
+        mark_object(obj->car);
+        mark_object(obj->cdr);
+        break;
+    case VECTOR: {
+        int i;
+        for (i = 0; i < obj->vsize; i++) {
+            if (obj->vector[i] != NULL)
+                mark_object(obj->vector[i]);
+        }
+        break;
+    }
+    default:
+        break;
+    }
+}
+
+void collect_hashed(struct object *obj) {
+    ht_delete(obj);
+    free(obj->string);
+}
+
+void debug_gc(struct object *obj) {
+    char *types[6] = {"INTEGER", "SYMBOL",    "STRING",
+                      "LIST",    "PRIMITIVE", "VECTOR"};
+    printf("\nCollecting object at %p, of type %s, value: ", (void *)obj,
+           types[obj->type]);
+    print_exp(NULL, obj);
+    putchar('\n');
+}
+
+int gc_sweep() {
+    struct object *obj = GC_HEAD;
+    struct object *tmp, *prev = NULL;
+    int freed = 0;
+    while (obj != NULL) {
+        if (obj->mark) {
+            obj->mark = false;
+            prev = obj;
+            obj = obj->gc_next;
+        } else {
+            if (prev != NULL)
+                prev->gc_next = obj->gc_next;
+            // object was the gc head, so move everything down one
+            if (obj == GC_HEAD)
+                GC_HEAD = obj->gc_next;
+
+            tmp = obj;
+            obj = obj->gc_next;
+#ifdef DEBUG_GC
+            debug_gc(tmp);
+#endif
+            if (tmp->type == STRING || tmp->type == SYMBOL)
+                collect_hashed(tmp);
+            push_object(&GC_POOL_HEAD, tmp);
+            freed++;
+            gc_objects_used--;
+        }
+    }
+    return freed;
+}
+
+void gc_mark(void *workspace_root) {
+    mark_object(ENV); // mark global environment
+    void **workspace = workspace_root;
+    /* pretty ugly this is
+     * iterate over workspace until we find the (void *)1 value
+     * marking off each object as we go.
+     * when we find the (void *)1 value, test if the last element is null
+     * if it is, we're at the end of the workspace chain.
+     */
+    for (;;) {
+        int i;
+        for (i = 0; workspace[i] != (void *)1; i++) {
+            if (workspace[i] != NULL)
+                mark_object(*(struct object **)workspace[i]);
+        }
+        if ((workspace = (void *)workspace[i + 1]) == NULL)
+            break;
+    }
+}
+
+/* invoke the garbage collector */
+int gc_pass(void *workspace) {
+    gc_mark(workspace);
+    return gc_sweep();
+}
+
 /*============================================================================
-Constructors and etc
-==============================================================================*/
+  Constructors and etc
+  ==============================================================================*/
 int __type_check(const char *func, struct object *obj, type_t type) {
     if (null(obj)) {
         fprintf(stderr, "Invalid argument to function %s: NIL\n", func);
@@ -148,8 +334,8 @@ int __type_check(const char *func, struct object *obj, type_t type) {
     return 1;
 }
 
-struct object *make_vector(int size) {
-    struct object *ret = alloc();
+struct object *make_vector(void *workspace, int size) {
+    struct object *ret = alloc(workspace);
     ret->type = VECTOR;
     ret->vector = malloc(sizeof(struct object *) * size);
     ret->vsize = size;
@@ -159,10 +345,10 @@ struct object *make_vector(int size) {
     return ret;
 }
 
-struct object *make_symbol(char *s) {
+struct object *make_symbol(void *workspace, char *s) {
     struct object *ret = ht_lookup(s);
     if (null(ret)) {
-        ret = alloc();
+        ret = alloc(workspace);
         ret->type = SYMBOL;
         ret->string = strdup(s);
         ht_insert(ret);
@@ -170,31 +356,43 @@ struct object *make_symbol(char *s) {
     return ret;
 }
 
-struct object *make_integer(int x) {
-    struct object *ret = alloc();
+struct object *make_integer(void *workspace, int x) {
+    struct object *ret = alloc(workspace);
     ret->type = INTEGER;
     ret->integer = x;
     return ret;
 }
 
-struct object *make_primitive(primitive_t x) {
-    struct object *ret = alloc();
+struct object *make_primitive(void *workspace, primitive_t x) {
+    struct object *ret = alloc(workspace);
     ret->type = PRIMITIVE;
     ret->primitive = x;
     return ret;
 }
 
-struct object *make_lambda(struct object *params, struct object *body) {
-    return cons(LAMBDA, cons(params, body));
+struct object *make_lambda(void *workspace, struct object *params,
+                           struct object *body) {
+    // Shouldn't need to localise here since `cons` makes sure they're
+    // preserved.
+    return cons(workspace, LAMBDA, cons(workspace, params, body));
 }
 
-struct object *make_procedure(struct object *params, struct object *body,
-                              struct object *env) {
-    return cons(PROCEDURE, cons(params, cons(body, cons(env, EMPTY_LIST))));
+struct object *make_procedure(void *workspace, struct object *params,
+                              struct object *body, struct object *env) {
+    create_workspace(3);
+    set_local(0, body);
+    set_local(1, params);
+    set_local(2, env);
+    return cons(workspace, PROCEDURE,
+                cons(workspace, params,
+                     cons(workspace, body, cons(workspace, env, EMPTY_LIST))));
 }
 
-struct object *cons(struct object *x, struct object *y) {
-    struct object *ret = alloc();
+struct object *cons(void *workspace, struct object *x, struct object *y) {
+    create_workspace(2);
+    set_local(0, x);
+    set_local(1, y);
+    struct object *ret = alloc(workspace);
     ret->type = LIST;
     ret->car = x;
     ret->cdr = y;
@@ -213,16 +411,23 @@ struct object *cdr(struct object *cell) {
     return cell->cdr;
 }
 
-struct object *append(struct object *l1, struct object *l2) {
+struct object *append(void *workspace, struct object *l1, struct object *l2) {
     if (null(l1))
         return l2;
-    return cons(car(l1), append(cdr(l1), l2));
+    create_workspace(2);
+    set_local(0, l1);
+    set_local(1, l2);
+    return cons(workspace, car(l1), append(workspace, cdr(l1), l2));
 }
 
-struct object *reverse(struct object *list, struct object *first) {
+struct object *reverse(void *workspace, struct object *list,
+                       struct object *first) {
     if (null(list))
         return first;
-    return reverse(cdr(list), cons(car(list), first));
+    create_workspace(2);
+    set_local(0, list);
+    set_local(1, first);
+    return reverse(workspace, cdr(list), cons(workspace, car(list), first));
 }
 
 bool is_equal(struct object *x, struct object *y) {
@@ -265,92 +470,95 @@ int length(struct object *exp) {
     return 1 + length(cdr(exp));
 }
 /*==============================================================================
-Primitive operations
-==============================================================================*/
+  Primitive operations
+  ==============================================================================*/
 
-struct object *prim_type(struct object *args) {
+struct object *prim_type(void *workspace, struct object *args) {
     char *types[6] = {"integer", "symbol",    "string",
                       "list",    "primitive", "vector"};
-    return make_symbol(types[car(args)->type]);
+    create_workspace(1);
+    set_local(0, args);
+    return make_symbol(workspace, types[car(args)->type]);
 }
 
-struct object *prim_get_env(struct object *args) {
+struct object *prim_get_env(void *workspace, struct object *args) {
     return ENV;
 }
-struct object *prim_set_env(struct object *args) {
+struct object *prim_set_env(void *workspace, struct object *args) {
     ENV = car(args);
     return NIL;
 }
 
-struct object *prim_list(struct object *args) {
+struct object *prim_list(void *workspace, struct object *args) {
     return (args);
 }
-struct object *prim_cons(struct object *args) {
-    return cons(car(args), cadr(args));
+struct object *prim_cons(void *workspace, struct object *args) {
+    return cons(workspace, car(args), cadr(args));
 }
 
-struct object *prim_car(struct object *args) {
+struct object *prim_car(void *workspace, struct object *args) {
 #ifdef STRICT
     ASSERT_TYPE(car(args), LIST);
 #endif
     return caar(args);
 }
 
-struct object *prim_cdr(struct object *args) {
+struct object *prim_cdr(void *workspace, struct object *args) {
 #ifdef STRICT
     ASSERT_TYPE(car(args), LIST);
 #endif
     return cdar(args);
 }
 
-struct object *prim_setcar(struct object *args) {
+struct object *prim_setcar(void *workspace, struct object *args) {
     ASSERT_TYPE(car(args), LIST);
     (args->car->car = (cadr(args)));
     return NIL;
 }
-struct object *prim_setcdr(struct object *args) {
+struct object *prim_setcdr(void *workspace, struct object *args) {
     ASSERT_TYPE(car(args), LIST);
     (args->car->cdr = (cadr(args)));
     return NIL;
 }
 
-struct object *prim_nullq(struct object *args) {
+struct object *prim_nullq(void *workspace, struct object *args) {
     return EOL(car(args)) ? TRUE : FALSE;
 }
 
-struct object *prim_pairq(struct object *args) {
+struct object *prim_pairq(void *workspace, struct object *args) {
     if (car(args)->type != LIST)
         return FALSE;
     return (atom(caar(args)) && atom(cdar(args))) ? TRUE : FALSE;
 }
 
-struct object *prim_listq(struct object *args) {
-    struct object *list;
+struct object *prim_listq(void *workspace, struct object *args) {
+    struct object *list = NULL;
     if (car(args)->type != LIST)
         return FALSE;
     for (list = car(args); !null(list); list = list->cdr)
         if (!null(list->cdr) && (list->cdr->type != LIST))
             return FALSE;
-    return (car(args)->type == LIST && prim_pairq(args) != TRUE) ? TRUE : FALSE;
+    return (car(args)->type == LIST && prim_pairq(NULL, args) != TRUE) ? TRUE
+                                                                       : FALSE;
 }
 
-struct object *prim_atomq(struct object *sexp) {
+struct object *prim_atomq(void *workspace, struct object *sexp) {
     return atom(car(sexp)) ? TRUE : FALSE;
 }
 
 /* = primitive, only valid for numbers */
-struct object *prim_neq(struct object *args) {
+struct object *prim_neq(void *workspace, struct object *args) {
     if ((car(args)->type != INTEGER) || (cadr(args)->type != INTEGER))
         return FALSE;
     return (car(args)->integer == cadr(args)->integer) ? TRUE : FALSE;
 }
 
 /* eq? primitive, checks memory location, or if equal values for primitives */
-struct object *prim_eq(struct object *args) {
+struct object *prim_eq(void *workspace, struct object *args) {
     return is_equal(car(args), cadr(args)) ? TRUE : FALSE;
 }
 
-struct object *prim_equal(struct object *args) {
+struct object *prim_equal(void *workspace, struct object *args) {
     if (is_equal(car(args), cadr(args)))
         return TRUE;
     if ((car(args)->type == LIST) && (cadr(args)->type == LIST)) {
@@ -368,7 +576,7 @@ struct object *prim_equal(struct object *args) {
     return FALSE;
 }
 
-struct object *prim_add(struct object *list) {
+struct object *prim_add(void *workspace, struct object *list) {
     ASSERT_TYPE(car(list), INTEGER);
     int64_t total = car(list)->integer;
     list = cdr(list);
@@ -377,10 +585,10 @@ struct object *prim_add(struct object *list) {
         total += car(list)->integer;
         list = cdr(list);
     }
-    return make_integer(total);
+    return make_integer(workspace, total);
 }
 
-struct object *prim_sub(struct object *list) {
+struct object *prim_sub(void *workspace, struct object *list) {
     ASSERT_TYPE(car(list), INTEGER);
     int64_t total = car(list)->integer;
     list = cdr(list);
@@ -389,10 +597,10 @@ struct object *prim_sub(struct object *list) {
         total -= car(list)->integer;
         list = cdr(list);
     }
-    return make_integer(total);
+    return make_integer(workspace, total);
 }
 
-struct object *prim_div(struct object *list) {
+struct object *prim_div(void *workspace, struct object *list) {
     ASSERT_TYPE(car(list), INTEGER);
     int64_t total = car(list)->integer;
     list = cdr(list);
@@ -401,10 +609,10 @@ struct object *prim_div(struct object *list) {
         total /= car(list)->integer;
         list = cdr(list);
     }
-    return make_integer(total);
+    return make_integer(workspace, total);
 }
 
-struct object *prim_mul(struct object *list) {
+struct object *prim_mul(void *workspace, struct object *list) {
     ASSERT_TYPE(car(list), INTEGER);
     int64_t total = car(list)->integer;
     list = cdr(list);
@@ -413,35 +621,35 @@ struct object *prim_mul(struct object *list) {
         total *= car(list)->integer;
         list = cdr(list);
     }
-    return make_integer(total);
+    return make_integer(workspace, total);
 }
-struct object *prim_gt(struct object *sexp) {
+struct object *prim_gt(void *workspace, struct object *sexp) {
     ASSERT_TYPE(car(sexp), INTEGER);
     ASSERT_TYPE(cadr(sexp), INTEGER);
     return (car(sexp)->integer > cadr(sexp)->integer) ? TRUE : NIL;
 }
 
-struct object *prim_lt(struct object *sexp) {
+struct object *prim_lt(void *workspace, struct object *sexp) {
     ASSERT_TYPE(car(sexp), INTEGER);
     ASSERT_TYPE(cadr(sexp), INTEGER);
     return (car(sexp)->integer < cadr(sexp)->integer) ? TRUE : NIL;
 }
 
-struct object *prim_print(struct object *args) {
+struct object *prim_print(void *workspace, struct object *args) {
     print_exp(NULL, car(args));
     printf("\n");
     return NIL;
 }
 
-struct object *prim_exit(struct object *args) {
+struct object *prim_exit(void *workspace, struct object *args) {
     exit(0);
 }
 
-struct object *prim_read(struct object *args) {
-    return read_exp(stdin);
+struct object *prim_read(void *workspace, struct object *args) {
+    return read_exp(workspace, stdin);
 }
 
-struct object *prim_vget(struct object *args) {
+struct object *prim_vget(void *workspace, struct object *args) {
     ASSERT_TYPE(car(args), VECTOR);
     ASSERT_TYPE(cadr(args), INTEGER);
     if (cadr(args)->integer >= car(args)->vsize)
@@ -449,7 +657,7 @@ struct object *prim_vget(struct object *args) {
     return car(args)->vector[cadr(args)->integer];
 }
 
-struct object *prim_vset(struct object *args) {
+struct object *prim_vset(void *workspace, struct object *args) {
     ASSERT_TYPE(car(args), VECTOR);
     ASSERT_TYPE(cadr(args), INTEGER);
     if (null(caddr(args)))
@@ -457,21 +665,41 @@ struct object *prim_vset(struct object *args) {
     if (cadr(args)->integer >= car(args)->vsize)
         return NIL;
     car(args)->vector[cadr(args)->integer] = caddr(args);
-    return make_symbol("ok");
+    return make_symbol(workspace, "ok");
 }
 
-struct object *prim_vec(struct object *args) {
+struct object *prim_vec(void *workspace, struct object *args) {
     ASSERT_TYPE(car(args), INTEGER);
-    return make_vector(car(args)->integer);
+    return make_vector(workspace, car(args)->integer);
+}
+
+struct object *prim_gc_objects_used(void *workspace, struct object *args) {
+    return make_integer(workspace, gc_objects_used);
+}
+
+struct object *prim_gc_pool_size(void *workspace, struct object *args) {
+    return make_integer(workspace, gc_pool_size);
+}
+
+struct object *prim_gc_total_alloc(void *workspace, struct object *args) {
+    return make_integer(workspace, gc_total_alloc);
+}
+
+struct object *prim_gc_pass(void *workspace, struct object *args) {
+    return make_integer(workspace, gc_pass(workspace));
 }
 
 /*==============================================================================
-Environment handling
-==============================================================================*/
+  Environment handling
+  ==============================================================================*/
 
-struct object *extend_env(struct object *var, struct object *val,
-                          struct object *env) {
-    return cons(cons(var, val), env);
+struct object *extend_env(void *workspace, struct object *var,
+                          struct object *val, struct object *env) {
+    create_workspace(3);
+    set_local(0, var);
+    set_local(1, val);
+    set_local(2, env);
+    return cons(workspace, cons(workspace, var, val), env);
 }
 
 struct object *lookup_variable(struct object *var, struct object *env) {
@@ -509,12 +737,11 @@ void set_variable(struct object *var, struct object *val, struct object *env) {
 }
 
 /* define_variable binds var to val in the *current* frame */
-struct object *define_variable(struct object *var, struct object *val,
-                               struct object *env) {
+struct object *define_variable(void *workspace, struct object *var,
+                               struct object *val, struct object *env) {
     struct object *frame = car(env);
     struct object *vars = car(frame);
     struct object *vals = cdr(frame);
-
     while (!null(vars)) {
         if (is_equal(var, car(vars))) {
             vals->car = val;
@@ -523,14 +750,18 @@ struct object *define_variable(struct object *var, struct object *val,
         vars = cdr(vars);
         vals = cdr(vals);
     }
-    frame->car = cons(var, car(frame));
-    frame->cdr = cons(val, cdr(frame));
+    create_workspace(3);
+    set_local(0, var);
+    set_local(1, val);
+    set_local(2, env);
+    frame->car = cons(workspace, var, car(frame));
+    frame->cdr = cons(workspace, val, cdr(frame));
     return val;
 }
 
 /*==============================================================================
-Recursive descent parser
-==============================================================================*/
+  Recursive descent parser
+  ==============================================================================*/
 
 char SYMBOLS[] = "~!@#$%^&*_-+\\:,.<>|{}[]?=/";
 
@@ -550,7 +781,7 @@ void skip(FILE *in) {
     }
 }
 
-struct object *read_string(FILE *in) {
+struct object *read_string(void *workspace, FILE *in) {
     char buf[256];
     int i = 0;
     int c;
@@ -562,12 +793,12 @@ struct object *read_string(FILE *in) {
         buf[i++] = (char)c;
     }
     buf[i] = '\0';
-    struct object *s = make_symbol(buf);
+    struct object *s = make_symbol(workspace, buf);
     s->type = STRING;
     return s;
 }
 
-struct object *read_symbol(FILE *in, char start) {
+struct object *read_symbol(void *workspace, FILE *in, char start) {
     char buf[128];
     buf[0] = start;
     int i = 1;
@@ -577,7 +808,7 @@ struct object *read_symbol(FILE *in, char start) {
         buf[i++] = getc(in);
     }
     buf[i] = '\0';
-    return make_symbol(buf);
+    return make_symbol(workspace, buf);
 }
 
 int read_int(FILE *in, int start) {
@@ -586,26 +817,29 @@ int read_int(FILE *in, int start) {
     return start;
 }
 
-struct object *read_list(FILE *in) {
-    struct object *obj;
+struct object *read_list(void *workspace, FILE *in) {
+    struct object *obj = NULL;
     struct object *cell = EMPTY_LIST;
+    create_workspace(2);
+    set_local(0, obj);
+    set_local(1, cell);
     for (;;) {
-        obj = read_exp(in);
-
+        obj = read_exp(workspace, in);
         if (obj == EMPTY_LIST)
-            return reverse(cell, EMPTY_LIST);
-        cell = cons(obj, cell);
+            return reverse(workspace, cell, EMPTY_LIST);
+        cell = cons(workspace, obj, cell);
     }
     return EMPTY_LIST;
 }
 
-struct object *read_quote(FILE *in) {
-    return cons(QUOTE, cons(read_exp(in), NIL));
+struct object *read_quote(void *workspace, FILE *in) {
+    return cons(workspace, QUOTE,
+                cons(workspace, read_exp(workspace, in), NIL));
 }
 
 int depth = 0;
 
-struct object *read_exp(FILE *in) {
+struct object *read_exp(void *workspace, FILE *in) {
     int c;
 
     for (;;) {
@@ -625,23 +859,23 @@ struct object *read_exp(FILE *in) {
         if (c == EOF)
             return NULL;
         if (c == '\"')
-            return read_string(in);
+            return read_string(workspace, in);
         if (c == '\'')
-            return read_quote(in);
+            return read_quote(workspace, in);
         if (c == '(') {
             depth++;
-            return read_list(in);
+            return read_list(workspace, in);
         }
         if (c == ')') {
             depth--;
             return EMPTY_LIST;
         }
         if (isdigit(c))
-            return make_integer(read_int(in, c - '0'));
+            return make_integer(workspace, read_int(in, c - '0'));
         if (c == '-' && isdigit(peek(in)))
-            return make_integer(-1 * read_int(in, getc(in) - '0'));
+            return make_integer(workspace, -1 * read_int(in, getc(in) - '0'));
         if (isalpha(c) || strchr(SYMBOLS, c))
-            return read_symbol(in, c);
+            return read_symbol(workspace, in, c);
     }
     return NIL;
 }
@@ -694,24 +928,35 @@ void print_exp(char *str, struct object *e) {
 }
 
 /*==============================================================================
-LISP evaluator
-==============================================================================*/
+  LISP evaluator
+  ==============================================================================*/
 
-struct object *evlis(struct object *exp, struct object *env) {
+struct object *evlis(void *workspace, struct object *exp, struct object *env) {
     if (null(exp))
         return NIL;
-    return cons(eval(car(exp), env), evlis(cdr(exp), env));
+    create_workspace(3);
+    set_local(0, exp);
+    set_local(1, env);
+    struct object *tmp = eval(workspace, car(exp), env);
+    set_local(2, tmp);
+    return cons(workspace, tmp, evlis(workspace, cdr(exp), env));
 }
 
-struct object *eval_sequence(struct object *exps, struct object *env) {
+struct object *eval_sequence(void *workspace, struct object *exps,
+                             struct object *env) {
     if (null(cdr(exps)))
-        return eval(car(exps), env);
-    eval(car(exps), env);
-    return eval_sequence(cdr(exps), env);
+        return eval(workspace, car(exps), env);
+    create_workspace(2);
+    set_local(0, exps);
+    set_local(1, env);
+    eval(workspace, car(exps), env);
+    return eval_sequence(workspace, cdr(exps), env);
 }
 
-struct object *eval(struct object *exp, struct object *env) {
-
+struct object *eval(void *workspace, struct object *exp, struct object *env) {
+    create_workspace(6);
+    set_local(0, exp);
+    set_local(1, env);
 tail:
     if (null(exp) || exp == EMPTY_LIST) {
         return NIL;
@@ -729,81 +974,95 @@ tail:
     } else if (is_tagged(exp, QUOTE)) {
         return cadr(exp);
     } else if (is_tagged(exp, LAMBDA)) {
-        return make_procedure(cadr(exp), cddr(exp), env);
+        return make_procedure(workspace, cadr(exp), cddr(exp), env);
     } else if (is_tagged(exp, DEFINE)) {
-        if (atom(cadr(exp)))
-            define_variable(cadr(exp), eval(caddr(exp), env), env);
-        else {
+        if (atom(cadr(exp))) {
+            define_variable(workspace, cadr(exp),
+                            eval(workspace, caddr(exp), env), env);
+        } else {
             struct object *closure =
-                eval(make_lambda(cdr(cadr(exp)), cddr(exp)), env);
-            define_variable(car(cadr(exp)), closure, env);
+                eval(workspace,
+                     make_lambda(workspace, cdr(cadr(exp)), cddr(exp)), env);
+            define_variable(workspace, car(cadr(exp)), closure, env);
         }
-        return make_symbol("ok");
+        return make_symbol(workspace, "ok");
     } else if (is_tagged(exp, BEGIN)) {
         struct object *args = cdr(exp);
+        set_local(2, args);
         for (; !null(cdr(args)); args = cdr(args))
-            eval(car(args), env);
+            eval(workspace, car(args), env);
         exp = car(args);
         goto tail;
     } else if (is_tagged(exp, IF)) {
-        struct object *predicate = eval(cadr(exp), env);
+        struct object *predicate = eval(workspace, cadr(exp), env);
         exp = (not_false(predicate)) ? caddr(exp) : cadddr(exp);
         goto tail;
-    } else if (is_tagged(exp, make_symbol("or"))) {
-        struct object *predicate = eval(cadr(exp), env);
+    } else if (is_tagged(exp, make_symbol(workspace, "or"))) {
+        struct object *predicate = eval(workspace, cadr(exp), env);
         exp = (not_false(predicate)) ? caddr(exp) : cadddr(exp);
         goto tail;
-    } else if (is_tagged(exp, make_symbol("cond"))) {
+    } else if (is_tagged(exp, make_symbol(workspace, "cond"))) {
         struct object *branch = cdr(exp);
+        set_local(2, branch);
         for (; !null(branch); branch = cdr(branch)) {
-            if (is_tagged(car(branch), make_symbol("else")) ||
-                not_false(eval(caar(branch), env))) {
-                exp = cons(BEGIN, cdar(branch));
+            if (is_tagged(car(branch), make_symbol(workspace, "else")) ||
+                not_false(eval(workspace, caar(branch), env))) {
+                exp = cons(workspace, BEGIN, cdar(branch));
                 goto tail;
             }
         }
         return NIL;
     } else if (is_tagged(exp, SET)) {
         if (atom(cadr(exp)))
-            set_variable(cadr(exp), eval(caddr(exp), env), env);
+            set_variable(cadr(exp), eval(workspace, caddr(exp), env), env);
         else {
             struct object *closure =
-                eval(make_lambda(cdr(cadr(exp)), cddr(exp)), env);
+                eval(workspace,
+                     make_lambda(workspace, cdr(cadr(exp)), cddr(exp)), env);
             set_variable(car(cadr(exp)), closure, env);
         }
-        return make_symbol("ok");
+        return make_symbol(workspace, "ok");
     } else if (is_tagged(exp, LET)) {
         /* We go with the strategy of transforming let into a lambda function*/
         struct object **tmp;
         struct object *vars = NIL;
         struct object *vals = NIL;
+        set_local(2, vars);
+        set_local(3, vals);
         if (null(cadr(exp)))
             return NIL;
         /* NAMED LET */
         if (atom(cadr(exp))) {
             for (tmp = &exp->cdr->cdr->car; !null(*tmp); tmp = &(*tmp)->cdr) {
-                vars = cons(caar(*tmp), vars);
-                vals = cons(cadar(*tmp), vals);
+                set_local(4, *tmp);
+                vars = cons(workspace, caar(*tmp), vars);
+                vals = cons(workspace, cadar(*tmp), vals);
             }
             /* Define the named let as a lambda function */
-            define_variable(cadr(exp), eval(make_lambda(vars, cdr(cddr(exp))),
-                                            extend_env(vars, vals, env)),
-                            env);
+            struct object *lambda =
+                make_lambda(workspace, vars, cdr(cddr(exp)));
+            set_local(4, lambda);
+            struct object *new_env = extend_env(workspace, vars, vals, env);
+            set_local(5, new_env);
+            define_variable(workspace, cadr(exp),
+                            eval(workspace, lambda, new_env), env);
             /* Then evaluate the lambda function with the starting values */
-            exp = cons(cadr(exp), vals);
+            exp = cons(workspace, cadr(exp), vals);
             goto tail;
         }
         for (tmp = &exp->cdr->car; !null(*tmp); tmp = &(*tmp)->cdr) {
-            vars = cons(caar(*tmp), vars);
-            vals = cons(cadar(*tmp), vals);
+            vars = cons(workspace, caar(*tmp), vars);
+            vals = cons(workspace, cadar(*tmp), vals);
         }
-        exp = cons(make_lambda(vars, cddr(exp)), vals);
+        exp = cons(workspace, make_lambda(workspace, vars, cddr(exp)), vals);
         goto tail;
     } else {
         /* procedure structure is as follows:
-        ('procedure, (parameters), (body), (env)) */
-        struct object *proc = eval(car(exp), env);
-        struct object *args = evlis(cdr(exp), env);
+           ('procedure, (parameters), (body), (env)) */
+        struct object *proc = eval(workspace, car(exp), env);
+        set_local(2, proc);
+        struct object *args = evlis(workspace, cdr(exp), env);
+        set_local(3, args);
         if (null(proc)) {
 #ifdef STRICT
             print_exp("Invalid arguments to eval:", exp);
@@ -813,10 +1072,10 @@ tail:
             return NIL;
         }
         if (proc->type == PRIMITIVE)
-            return proc->primitive(args);
+            return proc->primitive(workspace, args);
         if (is_tagged(proc, PROCEDURE)) {
-            env = extend_env(cadr(proc), args, cadddr(proc));
-            exp = cons(BEGIN, caddr(proc)); /* procedure body */
+            env = extend_env(workspace, cadr(proc), args, cadddr(proc));
+            exp = cons(workspace, BEGIN, caddr(proc)); /* procedure body */
             goto tail;
         }
     }
@@ -826,10 +1085,13 @@ tail:
 }
 
 extern char **environ;
-struct object *prim_exec(struct object *args) {
+struct object *prim_exec(void *workspace, struct object *args) {
     ASSERT_TYPE(car(args), STRING);
     int l = length(args);
     struct object *tmp = args;
+    create_workspace(2);
+    set_local(0, tmp);
+    set_local(1, args);
 
     char **newarg = malloc(sizeof(char *) * (l + 1));
     char **n = newarg;
@@ -852,14 +1114,20 @@ struct object *prim_exec(struct object *args) {
 }
 
 /* Initialize the global environment, add primitive functions and symbols */
-void init_env() {
-#define add_prim(s, c) define_variable(make_symbol(s), make_primitive(c), ENV)
+void init_env(void *workspace) {
+#define add_prim(s, c)                                                         \
+    tmp_sym = make_symbol(workspace, s);                                       \
+    define_variable(workspace, tmp_sym, make_primitive(workspace, c), ENV)
 #define add_sym(s, c)                                                          \
     do {                                                                       \
-        c = make_symbol(s);                                                    \
-        define_variable(c, c, ENV);                                            \
+        c = make_symbol(workspace, s);                                         \
+        set_local(1, c);                                                       \
+        define_variable(workspace, c, c, ENV);                                 \
     } while (0);
-    ENV = extend_env(NIL, NIL, NIL);
+    struct object *tmp_sym = NULL;
+    create_workspace(2);
+    set_local(0, tmp_sym);
+    ENV = extend_env(workspace, NIL, NIL, NIL);
     add_sym("#t", TRUE);
     add_sym("#f", FALSE);
     add_sym("quote", QUOTE);
@@ -870,8 +1138,8 @@ void init_env() {
     add_sym("set!", SET);
     add_sym("begin", BEGIN);
     add_sym("if", IF);
-    define_variable(make_symbol("true"), TRUE, ENV);
-    define_variable(make_symbol("false"), FALSE, ENV);
+    define_variable(workspace, make_symbol(workspace, "true"), TRUE, ENV);
+    define_variable(workspace, make_symbol(workspace, "false"), FALSE, ENV);
 
     add_prim("cons", prim_cons);
     add_prim("car", prim_car);
@@ -905,44 +1173,53 @@ void init_env() {
     add_prim("vector", prim_vec);
     add_prim("vector-get", prim_vget);
     add_prim("vector-set", prim_vset);
+    add_prim("gc-objects-used", prim_gc_objects_used);
+    add_prim("gc-pool-size", prim_gc_pool_size);
+    add_prim("gc-total-allocated", prim_gc_total_alloc);
+    add_prim("gc-pass", prim_gc_pass);
 }
 
 /* Loads and evaluates a file containing lisp s-expressions */
-struct object *load_file(struct object *args) {
-    struct object *exp;
+struct object *load_file(void *workspace, struct object *args) {
+    struct object *exp = NULL;
     struct object *ret = NULL;
+    create_workspace(1);
+    set_local(0, exp);
     char *filename = car(args)->string;
     printf("Evaluating file %s\n", filename);
     FILE *fp = fopen(filename, "r");
     if (fp == NULL) {
-    	printf("Error opening file %s\n", filename);
-    	return fp;
+        printf("Error opening file %s\n", filename);
+        return fp;
     }
 
     for (;;) {
-        exp = read_exp(fp);
+        exp = read_exp(workspace, fp);
         if (null(exp))
             break;
-        ret = eval(exp, ENV);
+        ret = eval(workspace, exp, ENV);
     }
     fclose(fp);
     return ret;
 }
 
 int main(int argc, char **argv) {
+    GC_HEAD = NULL;
+    void *workspace = workspace_base;
     int NELEM = 8191;
     ht_init(NELEM);
-    init_env();
-    struct object *exp;
+    init_env(workspace);
+    struct object *exp = NULL;
     int i;
 
     printf("uscheme intrepreter - michael lazear (c) 2016-2017\n");
     for (i = 1; i < argc; i++)
-        load_file(cons(make_symbol(argv[i]), NIL));
+        load_file(workspace,
+                  cons(workspace, make_symbol(workspace, argv[i]), NIL));
 
     for (;;) {
         printf("user> ");
-        exp = eval(read_exp(stdin), ENV);
+        exp = eval(workspace, read_exp(workspace, stdin), ENV);
         if (!null(exp)) {
             print_exp("====>", exp);
             printf("\n");
