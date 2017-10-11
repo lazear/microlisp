@@ -183,9 +183,9 @@ void gc_pool_maintain(void *workspace) {
         gc_pass(workspace);
 #endif
     if (gc_pool_size == gc_objects_used)
-        grow_pool(0.5 * gc_pool_size + 1); // grow to 150%
-    else if (gc_objects_used < 0.5 * gc_pool_size) // shrink when we have more than 50% unused
-        shrink_pool(gc_pool_size * 0.25); // trim off 25%
+        grow_pool((gc_pool_size >> 1) + 1); // grow to 150%
+    else if (gc_objects_used < gc_pool_size >> 1) // shrink when we have more than 50% unused
+        shrink_pool(gc_pool_size >> 2); // trim off 25%
 }
 
 void grow_pool(size_t n) {
