@@ -1,6 +1,6 @@
 language: c
 
-script: cd scheme && make && build/microlisp src/fib.scm
+script: cd scheme && ./configure && make && build/microlisp src/fib.scm
 
 notifications:
   email: false
