@@ -378,7 +378,8 @@ struct object *prim_equal(struct object *args) {
         }
         struct object **va = car(args)->vector;
         struct object **vb = cadr(args)->vector;
-        for (int i = 0; i < car(args)->vsize; i++) {
+        int i = 0;
+        for (i = 0; i < car(args)->vsize; i++) {
             if (!is_equal(*(va + i), *(vb + i))) {
                 return FALSE;
             }
@@ -942,7 +943,7 @@ struct object *load_file(struct object *args) {
         return NIL;
     }
 
-    for (;;) {
+for (;;) {
         exp = read_exp(fp);
         if (null(exp))
             break;
