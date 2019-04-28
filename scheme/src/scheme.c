@@ -2,6 +2,7 @@
 MIT License
 Copyright Michael Lazear (c) 2016 */
 
+#include <assert.h>
 #include <ctype.h>
 #include <errno.h>
 #include <stdbool.h>
@@ -279,7 +280,8 @@ struct object *prim_type(struct object *args) {
     return make_symbol(types[car(args)->type]);
 }
 
-struct object *prim_get_env(struct object *_args) {
+struct object *prim_get_env(struct object *args) {
+    assert(null(args));
     return ENV;
 }
 struct object *prim_set_env(struct object *args) {
@@ -451,11 +453,13 @@ struct object *prim_print(struct object *args) {
     return NIL;
 }
 
-struct object *prim_exit(struct object *_args) {
+struct object *prim_exit(struct object *args) {
+    assert(null(args));
     exit(0);
 }
 
-struct object *prim_read(struct object *_args) {
+struct object *prim_read(struct object *args) {
+    assert(null(args));
     return read_exp(stdin);
 }
 
