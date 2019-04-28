@@ -2,15 +2,15 @@
 MIT License
 Copyright Michael Lazear (c) 2016 */
 
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <stdbool.h>
 #include <ctype.h>
-#include <unistd.h>
-#include <sys/wait.h>
 #include <errno.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #define null(x) ((x) == NULL || (x) == NIL)
 #define EOL(x) (null((x)) || (x) == EMPTY_LIST)
@@ -225,6 +225,7 @@ struct object *reverse(struct object *list, struct object *first) {
     return reverse(cdr(list), cons(car(list), first));
 }
 
+// Pointer equality
 bool is_equal(struct object *x, struct object *y) {
 
     if (x == y)
@@ -241,6 +242,10 @@ bool is_equal(struct object *x, struct object *y) {
     case SYMBOL:
     case STRING:
         return !strcmp(x->string, y->string);
+    case PRIMITIVE:
+        return false;
+    case VECTOR:
+        return false;
     }
     return false;
 }
@@ -274,7 +279,7 @@ struct object *prim_type(struct object *args) {
     return make_symbol(types[car(args)->type]);
 }
 
-struct object *prim_get_env(struct object *args) {
+struct object *prim_get_env(struct object *_args) {
     return ENV;
 }
 struct object *prim_set_env(struct object *args) {
@@ -365,6 +370,19 @@ struct object *prim_equal(struct object *args) {
         }
         return TRUE;
     }
+    if ((car(args)->type == VECTOR) && (cadr(args)->type == VECTOR)) {
+        if (car(args)->vsize != cadr(args)->vsize) {
+            return FALSE;
+        }
+        struct object **va = car(args)->vector;
+        struct object **vb = cadr(args)->vector;
+        for (int i = 0; i < car(args)->vsize; i++) {
+            if (!is_equal(*(va + i), *(vb + i))) {
+                return FALSE;
+            }
+        }
+        return TRUE;
+    }
     return FALSE;
 }
 
@@ -433,11 +451,11 @@ struct object *prim_print(struct object *args) {
     return NIL;
 }
 
-struct object *prim_exit(struct object *args) {
+struct object *prim_exit(struct object *_args) {
     exit(0);
 }
 
-struct object *prim_read(struct object *args) {
+struct object *prim_read(struct object *_args) {
     return read_exp(stdin);
 }
 
@@ -786,8 +804,9 @@ tail:
                 vals = cons(cadar(*tmp), vals);
             }
             /* Define the named let as a lambda function */
-            define_variable(cadr(exp), eval(make_lambda(vars, cdr(cddr(exp))),
-                                            extend_env(vars, vals, env)),
+            define_variable(cadr(exp),
+                            eval(make_lambda(vars, cdr(cddr(exp))),
+                                 extend_env(vars, vals, env)),
                             env);
             /* Then evaluate the lambda function with the starting values */
             exp = cons(cadr(exp), vals);
@@ -915,8 +934,8 @@ struct object *load_file(struct object *args) {
     printf("Evaluating file %s\n", filename);
     FILE *fp = fopen(filename, "r");
     if (fp == NULL) {
-    	printf("Error opening file %s\n", filename);
-    	return fp;
+        printf("Error opening file %s\n", filename);
+        return NIL;
     }
 
     for (;;) {
@@ -936,7 +955,8 @@ int main(int argc, char **argv) {
     struct object *exp;
     int i;
 
-    printf("uscheme intrepreter - michael lazear (c) 2016-2017\n");
+    printf(
+        "Microlisp intrepreter - (c) Michael Lazear 2016-2019, MIT License\n");
     for (i = 1; i < argc; i++)
         load_file(cons(make_symbol(argv[i]), NIL));
 

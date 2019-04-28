@@ -10,7 +10,7 @@ BUILD_DIR=build
 DOCUMENTATION=docs
 OUTPUT=Makefile
 MANPATH=""
-PROJECT=$(basename "$PWD")
+PROJECT="microlisp"
 PROJECT_VER=""
 PREFIX=/usr/local/bin
 

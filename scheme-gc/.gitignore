@@ -2,3 +2,4 @@
 *.a
 *.tar.gz
 .config
+build/
