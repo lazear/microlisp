@@ -9,6 +9,6 @@ A set of minimal LISP[1] implementations.
 
 2. The `scheme-gc` folder contains a version of the `scheme` interpreter with a garbage collector
 
-To build and run either of the projects, `cd` into the folder and run `./configure && make && ./build/microlisp"
+To build and run either of the projects, `cd` into the folder and run `./configure && make && ./build/microlisp`
 
 [1]: http://www-formal.stanford.edu/jmc/recursive.pdf
